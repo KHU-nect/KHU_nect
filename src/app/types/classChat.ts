@@ -1,0 +1,20 @@
+export type ClassChatMessageKind = "text" | "question" | "sitTogether";
+
+export type ClassChatMessage = {
+  id: string;
+  courseId: string;
+  kind: ClassChatMessageKind;
+  content: string;
+  createdAt: string;
+  senderLabel: string;
+  /** 보낸 계정 id (없으면 예전 저장본 — isMe로만 구분) */
+  senderUserId?: string;
+  /** 같이 앉기 전용: 수락·만료 구분 */
+  sitRequestId?: string;
+  /** 같이 앉기: 이 시각 이후 목록에서 숨김 (ISO) */
+  expiresAt?: string;
+  /** @deprecated senderUserId로 대체, 구버전 호환 */
+  isMe: boolean;
+};
+
+export type InputMode = "normal" | "question" | "sitTogether";
