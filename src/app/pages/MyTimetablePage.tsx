@@ -1,14 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { ChevronLeft, Plus, Search, Trash2, X } from "lucide-react";
+import { ChevronLeft, Search, Trash2, X } from "lucide-react";
 import { useTimetable } from "../context/TimetableContext";
 import type { TimetableCourse } from "../mocks/timetable";
-import {
-  AVAILABLE_COURSES,
-  catalogToTimetableCourse,
-  type CatalogCourse,
-} from "../mocks/availableCourses";
-import { CourseSearchItem } from "../components/CourseSearchItem";
+import { CourseSearchItem, type SearchCourseItem } from "../components/CourseSearchItem";
 import { groupCoursesBySubject } from "../utils/courseGroups";
 import {
   DAY_LABELS,
@@ -21,6 +16,15 @@ import {
   SLOT_PX,
   sortWeekdayLabels,
 } from "../utils/timetableGrid";
+import { searchCourses } from "../api/courseApi";
+import {
+  addTimetableEntry,
+  deleteTimetableEntry,
+  getMyTimetable,
+  timetableEntryToCourse,
+} from "../api/timetableApi";
+import { ApiError } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 
 type ManualDraft = {
   name: string;
@@ -75,35 +79,23 @@ function manualToCourse(draft: ManualDraft, id: string): TimetableCourse | null 
 
 export function MyTimetablePage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { courses, addCourse, updateCourse, removeCourse } = useTimetable();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showResults, setShowResults] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchCourseItem[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [manual, setManual] = useState<ManualDraft>(() => emptyManual());
 
-  const searchResults = useMemo(
-    () =>
-      AVAILABLE_COURSES.filter(
-        (course) =>
-          course.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          course.professor.toLowerCase().includes(searchQuery.toLowerCase())
-      ),
-    [searchQuery]
-  );
-
   const rows = gridRowCount(courses);
   const gridHeight = rows * SLOT_PX;
 
   const groups = useMemo(() => groupCoursesBySubject(courses), [courses]);
-
-  const openAddSheet = () => {
-    setEditingId(null);
-    setManual(emptyManual());
-    setSheetOpen(true);
-  };
 
   const openEditSheet = (c: TimetableCourse) => {
     setEditingId(c.id);
@@ -122,17 +114,60 @@ export function MyTimetablePage() {
     setShowResults(q.length > 0);
   };
 
-  const handleAddFromCatalog = (catalog: CatalogCourse) => {
-    const tc = catalogToTimetableCourse(catalog, Date.now());
-    addCourse(tc);
+  const syncFromServer = async () => {
+    const rows = await getMyTimetable();
+    const mapped = rows.map(timetableEntryToCourse);
+    courses.forEach((c) => removeCourse(c.id));
+    mapped.forEach((c) => addCourse(c));
+  };
+
+  const handleAddFromCatalog = async (catalog: SearchCourseItem) => {
+    if (!user?.id || user.id.startsWith("demo-user-")) {
+      setErrorMessage("데모 계정에서는 기존 로컬 시간표 편집을 사용해주세요.");
+      return;
+    }
+    try {
+      setErrorMessage(null);
+      await addTimetableEntry(catalog.id);
+      await syncFromServer();
+    } catch (e) {
+      if (e instanceof ApiError) setErrorMessage(e.message);
+      else setErrorMessage("시간표 추가 중 오류가 발생했습니다.");
+    }
     setSearchQuery("");
     setShowResults(false);
   };
 
-  const catalogAlreadyAdded = (catalogId: number) =>
-    courses.some((c) => c.id.startsWith(`course-${catalogId}-`));
+  const catalogAlreadyAdded = (_catalogId: number) => false;
+
+  const parseServerEntryId = (id: string): number | null => {
+    if (!id.startsWith("server-")) return null;
+    const n = Number(id.slice("server-".length));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const handleRemove = async (id: string) => {
+    const entryId = parseServerEntryId(id);
+    if (!entryId || !user?.id || user.id.startsWith("demo-user-")) {
+      removeCourse(id);
+      return;
+    }
+    try {
+      setErrorMessage(null);
+      await deleteTimetableEntry(entryId);
+      await syncFromServer();
+    } catch (e) {
+      if (e instanceof ApiError) setErrorMessage(e.message);
+      else setErrorMessage("시간표 삭제 중 오류가 발생했습니다.");
+    }
+  };
 
   const handleSaveManual = () => {
+    if (editingId?.startsWith("server-")) {
+      setErrorMessage("서버 수업은 직접 수정할 수 없어요. 삭제 후 다시 추가해주세요.");
+      closeSheet();
+      return;
+    }
     if (editingId) {
       const next = manualToCourse(manual, editingId);
       if (next) updateCourse(editingId, next);
@@ -142,6 +177,35 @@ export function MyTimetablePage() {
     }
     closeSheet();
   };
+
+  useEffect(() => {
+    if (!showResults || !searchQuery.trim()) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const response = await searchCourses(searchQuery, 0, 20);
+        if (cancelled) return;
+        setSearchResults(
+          response.content.map((course) => ({
+            id: course.id,
+            name: course.courseName,
+            professor: course.professorName,
+            time: course.scheduleText,
+            room: course.classroom,
+          }))
+        );
+      } catch {
+        if (!cancelled) setSearchResults([]);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery, showResults]);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-28">
@@ -155,15 +219,6 @@ export function MyTimetablePage() {
           <ChevronLeft className="w-6 h-6 text-gray-700" />
         </button>
         <h1 className="text-lg font-bold text-gray-900 flex-1">내 시간표</h1>
-        <button
-          type="button"
-          onClick={openAddSheet}
-          className="p-2.5 rounded-xl text-white transition-all active:scale-95"
-          style={{ backgroundColor: "#A71930" }}
-          aria-label="수업 추가"
-        >
-          <Plus className="w-5 h-5" />
-        </button>
       </div>
 
       <div className="p-4 space-y-4">
@@ -178,29 +233,25 @@ export function MyTimetablePage() {
               className="flex-1 outline-none text-base bg-transparent"
             />
           </div>
-          {showResults && searchResults.length > 0 && (
+          {showResults && (
             <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-2xl shadow-lg max-h-72 overflow-y-auto z-30">
-              {searchResults.map((course) => (
-                <CourseSearchItem
-                  key={course.id}
-                  course={course}
-                  onAdd={handleAddFromCatalog}
-                  isAdded={catalogAlreadyAdded(course.id)}
-                />
-              ))}
+              {searchLoading && <div className="px-4 py-3 text-sm text-gray-500">검색 중...</div>}
+              {!searchLoading && searchResults.length === 0 && (
+                <div className="px-4 py-3 text-sm text-gray-500">검색 결과가 없어요.</div>
+              )}
+              {!searchLoading &&
+                searchResults.map((course) => (
+                  <CourseSearchItem
+                    key={course.id}
+                    course={course}
+                    onAdd={handleAddFromCatalog}
+                    isAdded={catalogAlreadyAdded(course.id)}
+                  />
+                ))}
             </div>
           )}
         </div>
-
-        <div className="text-center">
-          <button
-            type="button"
-            onClick={openAddSheet}
-            className="text-sm text-gray-500 underline hover:text-gray-800 active:text-gray-900"
-          >
-            직접 입력해서 등록하기
-          </button>
-        </div>
+        {errorMessage && <p className="text-sm text-red-600 px-1">{errorMessage}</p>}
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="grid grid-cols-6 border-b border-gray-200">
@@ -301,7 +352,7 @@ export function MyTimetablePage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => removeCourse(g.slots[0].id)}
+                    onClick={() => void handleRemove(g.slots[0].id)}
                     className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
                     aria-label="과목 삭제"
                   >

@@ -2,20 +2,17 @@ import { useNavigate } from "react-router";
 import { ChevronRight, LogOut } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { PageContainer } from "../components/PageContainer";
-import { mockUserProfile, type UserProfile } from "../mocks/user";
+import type { UserProfile } from "../mocks/user";
 import { DEMO_ACCOUNTS } from "../mocks/demoAccounts";
 import { seedDemoProfile } from "../utils/profileStorage";
+import { getGoogleLoginStartUrl } from "../utils/backendAuth";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login, logout, isAuthenticated, user } = useAuth();
 
   const handleMainLogin = () => {
-    login({
-      ...mockUserProfile,
-      email: "student@khu.ac.kr",
-    });
-    navigate("/onboarding-profile");
+    window.location.href = getGoogleLoginStartUrl();
   };
 
   const handleDemoLogin = (account: UserProfile) => {

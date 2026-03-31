@@ -11,10 +11,10 @@ import {
   ShoppingBag,
   Sparkles,
   Heart,
-  Plus,
   X,
   Star,
   ThumbsUp,
+  Pencil,
   type LucideIcon,
 } from "lucide-react";
 import { LionAvatar } from "../components/LionAvatar";
@@ -26,7 +26,13 @@ import { useAuth } from "../context/AuthContext";
 import { useProfile } from "../context/ProfileContext";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { Textarea } from "../components/ui/textarea";
 import { DEFAULT_USER_HOBBIES } from "../mocks/freeSlotPeers";
+import { addMyInterest, deleteMyInterest, getMyInterests } from "../api/interestApi";
+import { ApiError } from "../api/client";
+import { updateMyProfile } from "../api/userApi";
+import { HOBBY_CATEGORY_OPTIONS, sanitizeHobbies } from "../constants/hobbyOptions";
 
 interface ItemData {
   id: string;
@@ -46,6 +52,63 @@ interface Review {
   date: string;
 }
 
+const MAJOR_OPTIONS = [
+  "기계공학과",
+  "산업경영공학과",
+  "원자력공학과",
+  "화학공학과",
+  "정보전자신소재공학과",
+  "사회기반시스템공학과",
+  "건축공학과",
+  "환경학및환경공학과",
+  "건축학과",
+  "전자공학과",
+  "생체공학과",
+  "반도체공학과",
+  "컴퓨터공학과",
+  "소프트웨어융합학과",
+  "인공지능학과",
+  "응용수학과",
+  "응용물리학과",
+  "응용화학과",
+  "우주과학과",
+  "유전생명공학과",
+  "식품생명공학과",
+  "한방생명공학과",
+  "식물·환경신소재공학과",
+  "스마트팜과학과",
+  "산업디자인학과",
+  "시각디자인학과",
+  "환경조경디자인학과",
+  "의류디자인학과",
+  "디지털콘텐츠학과",
+  "도예학과",
+  "회화과",
+  "조소과",
+  "포스트모던음악학과",
+  "국제학과",
+  "프랑스어학과",
+  "스페인어학과",
+  "러시아어학과",
+  "중국어학과",
+  "일본어학과",
+  "한국어학과",
+  "영미어문학과",
+  "영미문화학과",
+  "글로벌커뮤니케이션학부",
+  "건축학과",
+  "체육학과",
+  "스포츠지도학과",
+  "스포츠의학학과",
+  "골프산업학과",
+  "태권도학과",
+];
+
+function maskedStudentNumber(studentNumber?: string, fallback = "2026****"): string {
+  if (!studentNumber || studentNumber.length < 4) return fallback;
+  return `${studentNumber.slice(0, 4)}****`;
+}
+
 export function MyPage() {
   const navigate = useNavigate();
   const { courses } = useTimetable();
@@ -55,10 +118,19 @@ export function MyPage() {
   const user = {
     department: profile?.department ?? "도예학과",
     name: profile?.nickname ? `${profile.nickname}님` : "쿠옹이님",
-    studentId: "2026****",
+    studentId: maskedStudentNumber(profile?.studentNumber),
     email: authUser?.email ?? "lion@khu.ac.kr",
     points: 850,
   };
+
+  const [isProfileEditOpen, setProfileEditOpen] = useState(false);
+  const [editNickname, setEditNickname] = useState(profile?.nickname ?? "");
+  const [editMajor, setEditMajor] = useState(profile?.department ?? "");
+  const [editStudentNumber, setEditStudentNumber] = useState(profile?.studentNumber ?? "");
+  const [editTodayQuestion, setEditTodayQuestion] = useState(profile?.todayQuestion ?? "");
+  const [editBio, setEditBio] = useState(profile?.bio ?? "");
+  const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   const [reviews] = useState<Review[]>([
     {
@@ -111,30 +183,166 @@ export function MyPage() {
   const [userPoints, setUserPoints] = useState(user.points);
 
   const [hobbies, setHobbies] = useState<string[]>(DEFAULT_USER_HOBBIES);
-  const [newHobby, setNewHobby] = useState("");
+  const [hobbyIdByName, setHobbyIdByName] = useState<Record<string, number>>({});
+  const [hobbySyncError, setHobbySyncError] = useState<string | null>(null);
+  const hobbyCategories = Object.keys(HOBBY_CATEGORY_OPTIONS);
+  const [selectedHobbyCategory, setSelectedHobbyCategory] = useState<string>(
+    hobbyCategories[0] ?? "투어"
+  );
 
   useEffect(() => {
     if (profile && profile.hobbies !== undefined) {
-      setHobbies(profile.hobbies);
+      setHobbies(sanitizeHobbies(profile.hobbies));
     }
   }, [profile?.id, profile?.hobbies]);
 
-  const persistHobbies = (next: string[]) => {
-    setHobbies(next);
-    if (profile && authUser) {
-      commitProfile({ ...profile, hobbies: next });
+  useEffect(() => {
+    setEditNickname(profile?.nickname ?? "");
+    setEditMajor(profile?.department ?? "");
+    setEditStudentNumber(profile?.studentNumber ?? "");
+    setEditTodayQuestion(profile?.todayQuestion ?? "");
+    setEditBio(profile?.bio ?? "");
+  }, [
+    profile?.id,
+    profile?.nickname,
+    profile?.department,
+    profile?.studentNumber,
+    profile?.todayQuestion,
+    profile?.bio,
+  ]);
+
+  const openProfileEdit = () => {
+    setEditNickname(profile?.nickname ?? "");
+    setEditMajor(profile?.department ?? "");
+    setEditStudentNumber(profile?.studentNumber ?? "");
+    setEditTodayQuestion(profile?.todayQuestion ?? "");
+    setEditBio(profile?.bio ?? "");
+    setProfileSaveError(null);
+    setProfileEditOpen(true);
+  };
+
+  const handleSaveProfile = async () => {
+    if (!authUser || !profile) return;
+    if (!editNickname.trim() || !editMajor.trim()) {
+      setProfileSaveError("닉네임과 전공을 입력해주세요.");
+      return;
+    }
+    if (!/^\d{10}$/.test(editStudentNumber)) {
+      setProfileSaveError("학번은 숫자 10자리로 입력해주세요.");
+      return;
+    }
+    setIsSavingProfile(true);
+    setProfileSaveError(null);
+    try {
+      if (!authUser.id.startsWith("demo-user-")) {
+        await updateMyProfile({
+          nickname: editNickname.trim(),
+          major: editMajor.trim(),
+        });
+      }
+      commitProfile({
+        ...profile,
+        nickname: editNickname.trim(),
+        department: editMajor.trim(),
+        studentNumber: editStudentNumber,
+        grade: `${editStudentNumber.slice(0, 2)}학번`,
+        todayQuestion: editTodayQuestion.trim() ? editTodayQuestion.trim() : undefined,
+        bio: editBio.trim() ? editBio.trim() : undefined,
+      });
+      setProfileEditOpen(false);
+    } catch (e) {
+      if (e instanceof ApiError) setProfileSaveError(e.message);
+      else setProfileSaveError("프로필 저장 중 오류가 발생했어요.");
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
-  const handleAddHobby = () => {
-    const t = newHobby.trim();
-    if (!t || hobbies.includes(t)) return;
-    persistHobbies([...hobbies, t]);
-    setNewHobby("");
+  useEffect(() => {
+    let cancelled = false;
+    if (!authUser?.id || authUser.id.startsWith("demo-user-")) return;
+
+    const run = async () => {
+      try {
+        const list = await getMyInterests();
+        if (cancelled) return;
+        const names = sanitizeHobbies(list.map((i) => i.name));
+        const idMap = Object.fromEntries(list.map((i) => [i.name, i.interestId] as const));
+        setHobbies(names);
+        setHobbyIdByName(idMap);
+        setHobbySyncError(null);
+        if (profile) {
+          commitProfile({ ...profile, hobbies: names });
+        }
+      } catch {
+        if (!cancelled) {
+          setHobbySyncError("관심사 동기화에 실패했어요.");
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id, profile?.id]);
+
+  const persistHobbies = (next: string[]) => {
+    const cleaned = sanitizeHobbies(next);
+    setHobbies(cleaned);
+    if (profile && authUser) {
+      commitProfile({ ...profile, hobbies: cleaned });
+    }
   };
 
-  const handleRemoveHobby = (hobbyToRemove: string) => {
-    persistHobbies(hobbies.filter((h) => h !== hobbyToRemove));
+  const handleAddHobby = async (hobby: string) => {
+    if (!hobby || hobbies.includes(hobby)) return;
+    if (!authUser?.id || authUser.id.startsWith("demo-user-")) {
+      persistHobbies([...hobbies, hobby]);
+      return;
+    }
+    try {
+      const added = await addMyInterest(hobby);
+      const next = [...hobbies, added.name];
+      persistHobbies(next);
+      setHobbyIdByName((prev) => ({ ...prev, [added.name]: added.interestId }));
+      setHobbySyncError(null);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setHobbySyncError(e.message);
+      } else {
+        setHobbySyncError("관심사 추가에 실패했어요.");
+      }
+    }
+  };
+
+  const handleRemoveHobby = async (hobbyToRemove: string) => {
+    if (!authUser?.id || authUser.id.startsWith("demo-user-")) {
+      persistHobbies(hobbies.filter((h) => h !== hobbyToRemove));
+      return;
+    }
+    const interestId = hobbyIdByName[hobbyToRemove];
+    if (!interestId) {
+      persistHobbies(hobbies.filter((h) => h !== hobbyToRemove));
+      return;
+    }
+    try {
+      await deleteMyInterest(interestId);
+      const next = hobbies.filter((h) => h !== hobbyToRemove);
+      persistHobbies(next);
+      setHobbyIdByName((prev) => {
+        const copied = { ...prev };
+        delete copied[hobbyToRemove];
+        return copied;
+      });
+      setHobbySyncError(null);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setHobbySyncError(e.message);
+      } else {
+        setHobbySyncError("관심사 삭제에 실패했어요.");
+      }
+    }
   };
 
   const handleBuyItem = (itemId: string) => {
@@ -206,6 +414,14 @@ export function MyPage() {
               <p className="text-sm opacity-90 truncate">{user.department}</p>
               <p className="text-xs opacity-75">{user.studentId}</p>
             </div>
+            <button
+              type="button"
+              onClick={openProfileEdit}
+              className="w-11 h-11 rounded-xl bg-white/20 hover:bg-white/30 transition-colors flex items-center justify-center"
+              aria-label="프로필 수정"
+            >
+              <Pencil className="w-5 h-5" />
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -274,6 +490,34 @@ export function MyPage() {
           </div>
         </div>
 
+        {/* Today's Question */}
+        {profile?.todayQuestion ? (
+          <div
+            className="rounded-2xl p-5 text-white shadow-sm"
+            style={{ background: "linear-gradient(135deg, #A71930 0%, #8B1526 100%)" }}
+          >
+            <p className="text-sm font-semibold opacity-95">오늘의 질문</p>
+            <p className="text-2xl font-bold mt-2 leading-snug">{profile.todayQuestion}</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <p className="text-sm font-semibold text-gray-700">오늘의 질문</p>
+            <p className="text-sm text-gray-500 mt-2">오늘은 질문이 없어요.</p>
+          </div>
+        )}
+
+        {/* Intro */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b border-gray-100">
+            <h3 className="font-bold text-gray-800">소개</h3>
+          </div>
+          <div className="p-4">
+            <p className="text-sm text-gray-700 leading-relaxed">
+              {profile?.bio || "소개글을 작성해 주세요."}
+            </p>
+          </div>
+        </div>
+
         {/* Hobbies & Interests */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-4 border-b border-gray-100">
@@ -285,6 +529,9 @@ export function MyPage() {
           </div>
           
           <div className="p-4 space-y-3">
+            {hobbySyncError && (
+              <p className="text-xs text-red-600">{hobbySyncError}</p>
+            )}
             <div className="flex flex-wrap gap-2">
               {hobbies.map((hobby) => (
                 <div
@@ -305,26 +552,55 @@ export function MyPage() {
               ))}
             </div>
 
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="새 취미 추가..."
-                  value={newHobby}
-                  onChange={(e) => setNewHobby(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      handleAddHobby();
-                    }
-                  }}
-                  className="flex-1 text-sm"
-                />
-                <Button
-                  onClick={handleAddHobby}
-                  size="icon"
-                  style={{ backgroundColor: "#A71930" }}
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
+            <div className="space-y-3">
+              <p className="text-xs text-gray-500">카테고리를 선택한 뒤, 세부 항목을 골라 추가하세요.</p>
+
+              <div className="flex flex-wrap gap-2">
+                {hobbyCategories.map((category) => {
+                  const active = selectedHobbyCategory === category;
+                  return (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setSelectedHobbyCategory(category)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                        active ? "text-white" : "text-gray-700 bg-gray-100 hover:bg-gray-200"
+                      }`}
+                      style={active ? { backgroundColor: "#A71930" } : undefined}
+                    >
+                      {category}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-xl p-3 border border-gray-100" style={{ backgroundColor: "#FAFAFA" }}>
+                <p className="text-xs font-semibold text-gray-500 mb-2">{selectedHobbyCategory} 세부 항목</p>
+                <div className="flex flex-wrap gap-2">
+                  {(HOBBY_CATEGORY_OPTIONS[
+                    selectedHobbyCategory as keyof typeof HOBBY_CATEGORY_OPTIONS
+                  ] ?? []
+                  ).map((option) => {
+                    const selected = hobbies.includes(option);
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => (selected ? void handleRemoveHobby(option) : void handleAddHobby(option))}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                          selected ? "text-white" : "text-gray-700"
+                        }`}
+                        style={
+                          selected
+                            ? { backgroundColor: "#A71930" }
+                            : { backgroundColor: "#FDF5E6", color: "#A71930" }
+                        }
+                      >
+                        {selected ? `✓ ${option}` : option}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
@@ -558,6 +834,109 @@ export function MyPage() {
           </div>
         </button>
       </div>
+
+      <Dialog open={isProfileEditOpen} onOpenChange={setProfileEditOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>프로필 수정</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <LionAvatar department={editMajor || user.department} size="lg" accessories={equippedItems} />
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-gray-700">닉네임</label>
+              <Input
+                value={editNickname}
+                onChange={(e) => setEditNickname(e.target.value)}
+                maxLength={12}
+                placeholder="쿠옹이님"
+              />
+              <p className="text-xs text-gray-500">최대 12자까지 입력 가능합니다</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-gray-700">전공</label>
+              <select
+                value={editMajor}
+                onChange={(e) => setEditMajor(e.target.value)}
+                className="w-full h-11 px-3 rounded-xl border border-gray-200 bg-white"
+              >
+                <option value="" disabled>
+                  전공을 선택해주세요
+                </option>
+                {MAJOR_OPTIONS.map((major) => (
+                  <option key={major} value={major}>
+                    {major}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-gray-700">학번</label>
+              <Input
+                value={editStudentNumber}
+                onChange={(e) =>
+                  setEditStudentNumber(e.target.value.replace(/\D/g, "").slice(0, 10))
+                }
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="예: 2026123456"
+              />
+              <p className="text-xs text-gray-500">숫자 10자리로 입력해주세요</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-gray-700">오늘의 질문</label>
+              <Textarea
+                value={editTodayQuestion}
+                onChange={(e) => setEditTodayQuestion(e.target.value)}
+                maxLength={60}
+                placeholder="예: 학식 메뉴 중 뭐가 제일 맛있어요?"
+                className="min-h-20"
+              />
+              <p className="text-xs text-gray-500">{editTodayQuestion.length}/60자</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-gray-700">소개</label>
+              <Textarea
+                value={editBio}
+                onChange={(e) => setEditBio(e.target.value)}
+                maxLength={100}
+                placeholder="자신을 소개해주세요 (예: 카페 좋아하는 도예학과 26학번입니다)"
+                className="min-h-24"
+              />
+              <p className="text-xs text-gray-500">{editBio.length}/100자</p>
+            </div>
+
+            {profileSaveError && <p className="text-sm text-red-600">{profileSaveError}</p>}
+
+            <div className="flex gap-3 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => setProfileEditOpen(false)}
+                disabled={isSavingProfile}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                className="flex-1 text-white"
+                style={{ backgroundColor: "#A71930" }}
+                onClick={handleSaveProfile}
+                disabled={isSavingProfile}
+              >
+                {isSavingProfile ? "저장 중..." : "저장"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

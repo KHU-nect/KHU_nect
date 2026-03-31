@@ -4,57 +4,59 @@ import { ChevronRight } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useProfile, type Profile } from "../context/ProfileContext";
 import { PageContainer } from "../components/PageContainer";
+import { completeSignup } from "../api/userApi";
+import { ApiError } from "../api/client";
 
 const departments = [
-  "국어국문학과",
-  "영어영문학과",
-  "사학과",
-  "철학과",
-  "경영학과",
-  "회계·세무학과",
-  "경제학과",
-  "국제통상·금융투자학과",
+  "기계공학과",
+  "산업경영공학과",
+  "원자력공학과",
+  "화학공학과",
+  "정보전자신소재공학과",
+  "사회기반시스템공학과",
+  "건축공학과",
+  "환경학및환경공학과",
+  "건축학과",
+  "전자공학과",
+  "생체공학과",
+  "반도체공학과",
   "컴퓨터공학과",
   "소프트웨어융합학과",
-  "전자공학과",
-  "정보디스플레이학과",
-  "생체의공학과",
-  "산업경영공학과",
-  "건축학과",
-  "건축공학과",
-  "화학공학과",
-  "생명공학과",
-  "한의예과",
-  "한의학과",
-  "간호학과",
-  "약학과",
-  "의예과",
-  "의학과",
-  "치의예과",
-  "치의학과",
-  "예술디자인대학",
-  "도예학과",
+  "인공지능학과",
+  "응용수학과",
+  "응용물리학과",
+  "응용화학과",
+  "우주과학과",
+  "유전생명공학과",
+  "식품생명공학과",
+  "한방생명공학과",
+  "식물·환경신소재공학과",
+  "스마트팜과학과",
+  "국제학과",
+  "프랑스어학과",
+  "스페인어학과",
+  "러시아어학과",
+  "중국어학과",
+  "일본어학과",
+  "한국어학과",
+  "영미어문학과",
+  "영미문화학과",
+  "글로벌커뮤니케이션학부",
+  "산업디자인학과",
+  "시각디자인학과",
   "환경조경디자인학과",
   "의류디자인학과",
-  "시각디자인학과",
-  "산업디자인학과",
-  "무용학부",
+  "디지털콘텐츠학과",
+  "도예학과",
+  "회화과",
+  "조소과",
+  "포스트모던음악학과",
   "체육학과",
-  "태권도학과",
-  "스포츠의학과",
+  "스포츠지도학과",
+  "스포츠의학학과",
   "골프산업학과",
-  "국제학과",
-  "한국어학과",
-  "응용영어통번역학과",
-  "글로벌커뮤니케이션학부",
-  "정치외교학과",
-  "행정학과",
-  "사회학과",
-  "미디어학과",
-  "경영학부",
+  "태권도학과",
 ];
-
-const grades = ["20학번", "21학번", "22학번", "23학번", "24학번", "25학번", "26학번"];
 
 export function OnboardingProfilePage() {
   const navigate = useNavigate();
@@ -62,10 +64,11 @@ export function OnboardingProfilePage() {
   const { profile, draftProfile, commitProfile } = useProfile();
   const [nickname, setNickname] = useState("");
   const [department, setDepartment] = useState("");
-  const [grade, setGrade] = useState("");
+  const [studentNumber, setStudentNumber] = useState("");
   const [showDepartmentList, setShowDepartmentList] = useState(false);
-  const [showGradeList, setShowGradeList] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // 이미 저장된 프로필이 있으면 폼 초기값으로 사용
   useEffect(() => {
@@ -73,11 +76,11 @@ export function OnboardingProfilePage() {
     if (source) {
       setNickname(source.nickname ?? "");
       setDepartment(source.department ?? "");
-      setGrade(source.grade ?? "");
+      setStudentNumber(source.studentNumber ?? "");
     } else if (user) {
       setNickname(user.nickname ?? "");
       setDepartment(user.department ?? "");
-      setGrade(user.grade ?? "");
+      setStudentNumber("");
     }
   }, [draftProfile, profile, user]);
 
@@ -85,8 +88,19 @@ export function OnboardingProfilePage() {
     dept.includes(searchTerm)
   );
 
-  const handleNext = () => {
-    if (!nickname || !department || !grade) return;
+  const handleNext = async () => {
+    if (!nickname || !department || !studentNumber) return;
+    if (!user?.id) {
+      setSubmitError("로그인이 필요합니다.");
+      return;
+    }
+    if (!/^\d{10}$/.test(studentNumber)) {
+      setSubmitError("학번은 숫자 10자리로 입력해주세요.");
+      return;
+    }
+
+    setSubmitError(null);
+    setSubmitting(true);
 
     const base: Profile =
       draftProfile ??
@@ -103,14 +117,32 @@ export function OnboardingProfilePage() {
       ...base,
       nickname,
       department,
-      grade,
+      studentNumber,
+      grade: `${studentNumber.slice(0, 2)}학번`,
     };
 
-    commitProfile(updated);
-    navigate("/onboarding");
+    try {
+      await completeSignup({
+        nickname,
+        major: department,
+        studentNumber,
+      });
+      commitProfile(updated);
+      navigate("/onboarding");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        const fieldReason = e.payload?.fieldErrors?.[0]?.reason;
+        setSubmitError(fieldReason ?? e.message);
+      } else {
+        setSubmitError("프로필 저장 중 오류가 발생했습니다.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const isFormValid = nickname.trim() !== "" && department !== "" && grade !== "";
+  const isFormValid =
+    nickname.trim() !== "" && department !== "" && /^\d{10}$/.test(studentNumber);
 
   return (
     <PageContainer>
@@ -167,7 +199,6 @@ export function OnboardingProfilePage() {
             <button
               onClick={() => {
                 setShowDepartmentList(!showDepartmentList);
-                setShowGradeList(false);
               }}
               className="w-full h-12 px-4 rounded-xl border-2 border-gray-200 focus:border-[#A71930] transition-colors flex items-center justify-between bg-white"
             >
@@ -213,54 +244,39 @@ export function OnboardingProfilePage() {
           </div>
         </div>
 
-        {/* Grade Select */}
+        {/* Student Number Input */}
         <div className="space-y-2">
           <label className="block text-sm font-semibold text-gray-700">
             학번
           </label>
-          <div className="relative">
-            <button
-              onClick={() => {
-                setShowGradeList(!showGradeList);
-                setShowDepartmentList(false);
-              }}
-              className="w-full h-12 px-4 rounded-xl border-2 border-gray-200 focus:border-[#A71930] transition-colors flex items-center justify-between bg-white"
-            >
-              <span className={grade ? "text-gray-800" : "text-gray-400"}>
-                {grade || "학번을 선택해주세요"}
-              </span>
-              <ChevronRight className={`w-5 h-5 text-gray-400 transition-transform ${showGradeList ? "rotate-90" : ""}`} />
-            </button>
-
-            {showGradeList && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-64 overflow-y-auto z-20">
-                {grades.map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => {
-                      setGrade(g);
-                      setShowGradeList(false);
-                    }}
-                    className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors text-sm border-b border-gray-50 last:border-b-0"
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={studentNumber}
+            onChange={(e) => {
+              const onlyDigits = e.target.value.replace(/\D/g, "").slice(0, 10);
+              setStudentNumber(onlyDigits);
+            }}
+            placeholder="예: 2026123456"
+            maxLength={10}
+            className="w-full h-12 px-4 rounded-xl border-2 border-gray-200 focus:border-[#A71930] focus:outline-none transition-colors"
+          />
+          <p className="text-xs text-gray-500">숫자 10자리로 입력해주세요.</p>
         </div>
+        {submitError && (
+          <p className="text-sm text-red-600 text-center">{submitError}</p>
+        )}
       </div>
 
       {/* Bottom Button */}
       <div className="p-5 bg-white border-t border-gray-200">
         <button
           onClick={handleNext}
-          disabled={!isFormValid}
+          disabled={!isFormValid || submitting}
           className="w-full h-14 text-white font-bold rounded-2xl text-base shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
           style={{ backgroundColor: "#A71930" }}
         >
-          다음
+          {submitting ? "저장 중..." : "다음"}
         </button>
       </div>
     </PageContainer>

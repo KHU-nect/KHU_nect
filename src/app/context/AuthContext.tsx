@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import type { UserProfile } from "../mocks/user";
+import { clearAuthTokens } from "../utils/backendAuth";
 
 type AuthState = {
   isAuthenticated: boolean;
@@ -46,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    clearAuthTokens();
     setState({ isAuthenticated: false, user: null });
   };
 

@@ -1,13 +1,20 @@
 import { Plus } from "lucide-react";
-import type { CatalogCourse } from "../mocks/availableCourses";
+
+export type SearchCourseItem = {
+  id: number;
+  name: string;
+  professor: string;
+  time: string;
+  room: string;
+};
 
 export function CourseSearchItem({
   course,
   onAdd,
   isAdded,
 }: {
-  course: CatalogCourse;
-  onAdd: (course: CatalogCourse) => void;
+  course: SearchCourseItem;
+  onAdd: (course: SearchCourseItem) => void;
   isAdded: boolean;
 }) {
   return (

@@ -170,7 +170,7 @@ export function getPeersForMatchingTab(
   );
 }
 
-export const DEFAULT_USER_HOBBIES = ["카페투어", "독서", "사진", "영화감상", "운동"];
+export const DEFAULT_USER_HOBBIES = ["카페 맛집", "독서", "영화", "요리", "러닝"];
 
 export const FREE_SLOT_PEERS: FreeSlotPeer[] = [
   {

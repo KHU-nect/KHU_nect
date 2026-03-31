@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { LionAvatar } from "./LionAvatar";
-import { Mail, Calendar, Heart, Sparkles, MessageCircle, ThumbsUp, Star, X } from "lucide-react";
+import { Mail, Calendar, Heart, MessageCircle, ThumbsUp, Star, X, Sparkles } from "lucide-react";
 import { Button } from "./ui/button";
 import { useState } from "react";
 import { Textarea } from "./ui/textarea";
@@ -12,8 +12,8 @@ interface UserProfileDialogProps {
     department: string;
     name?: string;
     year?: string;
+    todayQuestion?: string;
     activity?: string;
-    tag?: string;
     hobbies?: string[];
     bio?: string;
     matchingRate?: number;
@@ -43,6 +43,7 @@ export function UserProfileDialog({ isOpen, onClose, user, showReviewButton = fa
   if (!user) {
     return null;
   }
+  const todayQuestion = user.todayQuestion ?? user.activity;
 
   return (
     <>
@@ -66,19 +67,24 @@ export function UserProfileDialog({ isOpen, onClose, user, showReviewButton = fa
               </div>
             </div>
 
-            {/* Current Activity */}
-            {user.activity && (
-              <div className="bg-gradient-to-br from-[#A71930] to-[#8B1526] rounded-2xl p-5 text-white">
+            {todayQuestion ? (
+              <div
+                className="rounded-2xl p-5 text-white"
+                style={{ background: "linear-gradient(135deg, #A71930 0%, #8B1526 100%)" }}
+              >
                 <div className="flex items-center gap-2 mb-2">
                   <Sparkles className="w-5 h-5" />
-                  <span className="text-sm font-semibold">현재 활동</span>
+                  <span className="text-sm font-semibold">오늘의 질문</span>
                 </div>
-                <p className="text-lg font-bold">{user.activity}</p>
-                {user.tag && (
-                  <div className="mt-2 inline-block px-3 py-1 rounded-lg bg-white/20 text-sm">
-                    {user.tag}
-                  </div>
-                )}
+                <p className="text-base font-bold leading-snug">{todayQuestion}</p>
+              </div>
+            ) : (
+              <div className="bg-gray-50 rounded-2xl p-5">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-5 h-5" style={{ color: "#A71930" }} />
+                  <span className="text-sm font-semibold text-gray-700">오늘의 질문</span>
+                </div>
+                <p className="text-sm text-gray-600">오늘은 질문이 없어요.</p>
               </div>
             )}
 

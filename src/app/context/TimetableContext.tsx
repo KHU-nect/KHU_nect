@@ -8,6 +8,7 @@ import {
   seedDemoTimetablesIfEmpty,
   timetableKeyForUser,
 } from "../utils/timetableStorage";
+import { getMyTimetable, timetableEntryToCourse } from "../api/timetableApi";
 
 function persistTimetable(userId: string | undefined, courses: TimetableCourse[]) {
   const uid = userId ?? "guest";
@@ -31,6 +32,7 @@ export function TimetableProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     setLoaded(false);
     seedDemoTimetablesIfEmpty();
 
@@ -38,23 +40,47 @@ export function TimetableProvider({ children }: { children: ReactNode }) {
     const key = timetableKeyForUser(uid);
     const raw = window.localStorage.getItem(key);
 
-    if (raw !== null) {
-      setCourses(parseTimetableJson(raw));
-      setLoaded(true);
-      return;
-    }
+    const run = async () => {
+      if (raw !== null) {
+        const parsed = parseTimetableJson(raw);
+        if (!cancelled) {
+          setCourses(parsed);
+          setLoaded(true);
+        }
+      } else {
+        const legacy = readLegacyTimetableIfAny();
+        if (legacy && legacy.length > 0) {
+          if (!cancelled) {
+            setCourses(legacy);
+            window.localStorage.setItem(key, JSON.stringify(legacy));
+            clearLegacyTimetableKey();
+            setLoaded(true);
+          }
+        } else if (!cancelled) {
+          setCourses(mockTimetable);
+          setLoaded(true);
+        }
+      }
 
-    const legacy = readLegacyTimetableIfAny();
-    if (legacy && legacy.length > 0) {
-      setCourses(legacy);
-      window.localStorage.setItem(key, JSON.stringify(legacy));
-      clearLegacyTimetableKey();
-      setLoaded(true);
-      return;
-    }
+      // 데모 계정/게스트는 기존 로컬 흐름 유지
+      if (!user?.id || user.id.startsWith("demo-user-")) return;
 
-    setCourses(mockTimetable);
-    setLoaded(true);
+      try {
+        const remote = await getMyTimetable();
+        if (cancelled) return;
+        const mapped = remote.map(timetableEntryToCourse);
+        setCourses(mapped);
+        persistTimetable(user.id, mapped);
+        setLoaded(true);
+      } catch {
+        // 서버 조회 실패 시 로컬 값 유지
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   const addCourse = (course: TimetableCourse) => {

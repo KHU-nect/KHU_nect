@@ -7,6 +7,10 @@ export type InterestsTag = {
 };
 
 export type Profile = UserProfile & {
+  /** 백엔드 studentNumber 원문(10자리) 저장용 */
+  studentNumber?: string;
+  /** 사용자 작성 오늘의 질문 (로컬 저장) */
+  todayQuestion?: string;
   mbti?: string;
   bio?: string;
   interests?: InterestsTag[];

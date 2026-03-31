@@ -13,6 +13,7 @@ import { MyPage } from "./pages/MyPage";
 import { TimetablePage } from "./pages/TimetablePage";
 import { MyTimetablePage } from "./pages/MyTimetablePage";
 import { ChatPage } from "./pages/ChatPage";
+import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { Layout } from "./components/Layout";
 
 export const router = createBrowserRouter([
@@ -31,6 +32,10 @@ export const router = createBrowserRouter([
   {
     path: "/onboarding-complete",
     Component: OnboardingCompletePage,
+  },
+  {
+    path: "/auth/callback",
+    Component: AuthCallbackPage,
   },
   {
     path: "/home",

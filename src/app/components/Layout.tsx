@@ -71,7 +71,7 @@ export function Layout() {
 
       {/* Bottom Navigation */}
       {!isOnboarding && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 safe-area-bottom max-w-md md:max-w-2xl lg:max-w-3xl mx-auto">
+        <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-200 safe-area-bottom max-w-md md:max-w-2xl lg:max-w-3xl mx-auto">
           <div className="flex items-center justify-around h-16 px-2 relative">
             {navItems.map(({ path, icon: Icon, label }) => {
               const isActive = location.pathname === path || 

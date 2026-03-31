@@ -1,35 +1,44 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
 import { Search, X, Upload, Image as ImageIcon } from "lucide-react";
 import { useTimetable } from "../context/TimetableContext";
 import { PageContainer } from "../components/PageContainer";
 import { CourseSearchItem } from "../components/CourseSearchItem";
-import {
-  AVAILABLE_COURSES,
-  catalogToTimetableCourse,
-  type CatalogCourse,
-} from "../mocks/availableCourses";
+import { searchCourses, type CourseSummary } from "../api/courseApi";
+import { addTimetableEntry, getMyTimetable, timetableEntryToCourse } from "../api/timetableApi";
+import { ApiError } from "../api/client";
+
+type SelectedCourse = {
+  id: number;
+  name: string;
+  professor: string;
+  time: string;
+  room: string;
+};
 
 export function OnboardingPage() {
   const navigate = useNavigate();
   const { addCourse, clearCourses } = useTimetable();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCourses, setSelectedCourses] = useState<CatalogCourse[]>([]);
+  const [selectedCourses, setSelectedCourses] = useState<SelectedCourse[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<SelectedCourse[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
-    setShowResults(query.length > 0);
+    setShowResults(query.trim().length > 0);
   };
 
-  const searchResults = AVAILABLE_COURSES.filter(
-    (course) =>
-      course.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      course.professor.toLowerCase().includes(searchQuery.toLowerCase())
+  const selectedIdSet = useMemo(
+    () => new Set(selectedCourses.map((course) => course.id)),
+    [selectedCourses]
   );
 
-  const handleAddCourse = (course: CatalogCourse) => {
+  const handleAddCourse = (course: SelectedCourse) => {
     if (!selectedCourses.find((c) => c.id === course.id)) {
       setSelectedCourses([...selectedCourses, course]);
     }
@@ -41,7 +50,7 @@ export function OnboardingPage() {
     setSelectedCourses(selectedCourses.filter((c) => c.id !== courseId));
   };
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -52,17 +61,63 @@ export function OnboardingPage() {
     }
   };
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     if (selectedCourses.length === 0 && !uploadedImage) return;
 
-    // 기존 시간표를 현재 선택한 강의들로 교체
-    clearCourses();
-    selectedCourses.forEach((course, index) => {
-      addCourse(catalogToTimetableCourse(course, `${Date.now()}-${index}`));
-    });
-
-    navigate("/onboarding-complete");
+    setSubmitLoading(true);
+    setErrorMessage(null);
+    try {
+      for (const course of selectedCourses) {
+        await addTimetableEntry(course.id);
+      }
+      const timetableEntries = await getMyTimetable();
+      clearCourses();
+      timetableEntries.forEach((entry) => {
+        addCourse(timetableEntryToCourse(entry));
+      });
+      navigate("/onboarding-complete");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setErrorMessage(e.message);
+      } else {
+        setErrorMessage("시간표 등록 중 오류가 발생했습니다.");
+      }
+    } finally {
+      setSubmitLoading(false);
+    }
   };
+
+  useEffect(() => {
+    if (!showResults || !searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const response = await searchCourses(searchQuery, 0, 20);
+        if (cancelled) return;
+        const mapped = response.content.map((course: CourseSummary) => ({
+          id: course.id,
+          name: course.courseName,
+          professor: course.professorName,
+          time: course.scheduleText,
+          room: course.classroom,
+        }));
+        setSearchResults(mapped);
+      } catch {
+        if (!cancelled) setSearchResults([]);
+      } finally {
+        if (!cancelled) setSearchLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery, showResults]);
 
   return (
     <PageContainer className="bg-white">
@@ -94,26 +149,27 @@ export function OnboardingPage() {
           </div>
 
           {/* Search Results */}
-          {showResults && searchResults.length > 0 && (
+          {showResults && (
             <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-2xl shadow-lg max-h-80 overflow-y-auto z-10">
-              {searchResults.map((course) => (
-                <CourseSearchItem
-                  key={course.id}
-                  course={course}
-                  onAdd={handleAddCourse}
-                  isAdded={selectedCourses.some((c) => c.id === course.id)}
-                />
-              ))}
+              {searchLoading && (
+                <div className="px-4 py-3 text-sm text-gray-500">검색 중...</div>
+              )}
+              {!searchLoading && searchResults.length === 0 && (
+                <div className="px-4 py-3 text-sm text-gray-500">검색 결과가 없어요.</div>
+              )}
+              {!searchLoading &&
+                searchResults.map((course) => (
+                  <CourseSearchItem
+                    key={course.id}
+                    course={course}
+                    onAdd={handleAddCourse}
+                    isAdded={selectedIdSet.has(course.id)}
+                  />
+                ))}
             </div>
           )}
         </div>
 
-        {/* Direct Input Link */}
-        <div className="text-center mt-4">
-          <button className="text-sm text-gray-500 underline hover:text-gray-700 active:text-gray-900">
-            직접 입력해서 등록하기
-          </button>
-        </div>
       </div>
 
       {/* Selected Courses */}
@@ -212,14 +268,18 @@ export function OnboardingPage() {
         {/* Complete Button */}
         <button
           onClick={handleComplete}
-          disabled={selectedCourses.length === 0 && !uploadedImage}
+          disabled={(selectedCourses.length === 0 && !uploadedImage) || submitLoading}
           className="w-full py-4 rounded-full text-white font-semibold text-base transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg active:scale-95"
           style={{
             backgroundColor: (selectedCourses.length > 0 || uploadedImage) ? "#A71930" : "#D1D5DB",
           }}
         >
-          시간표 등록 완료
+          {submitLoading ? "등록 중..." : "시간표 등록 완료"}
         </button>
+
+        {errorMessage && (
+          <p className="text-center text-sm text-red-600 mt-2">{errorMessage}</p>
+        )}
 
         {selectedCourses.length === 0 && !uploadedImage && (
           <p className="text-center text-sm text-gray-400 mt-3">

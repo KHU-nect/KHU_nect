@@ -1,13 +1,14 @@
 import React, {
   createContext,
   useContext,
-  useLayoutEffect,
+  useEffect,
   useState,
   type ReactNode,
 } from "react";
 import { useAuth } from "./AuthContext";
 import type { Profile } from "../types/profile";
 import { getStoredProfile, saveProfileForUser } from "../utils/profileStorage";
+import { getMyProfile } from "../api/userApi";
 
 export type { InterestsTag, Profile } from "../types/profile";
 
@@ -26,15 +27,56 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [draftProfile, setDraft] = useState<Profile | null>(null);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    let cancelled = false;
     if (!isAuthenticated || !user) {
       setProfile(null);
       setDraft(null);
       return;
     }
-    const stored = getStoredProfile(user);
-    setProfile(stored);
-    setDraft(stored);
+    const run = async () => {
+      const stored = getStoredProfile(user);
+      if (stored) {
+        if (!cancelled) {
+          setProfile(stored);
+          setDraft(stored);
+        }
+      }
+
+      // 데모 계정은 로컬 시드/편집 흐름 유지
+      if (user.id.startsWith("demo-user-")) {
+        if (!stored && !cancelled) {
+          setProfile(null);
+          setDraft(null);
+        }
+        return;
+      }
+
+      try {
+        const remote = await getMyProfile();
+        if (cancelled) return;
+        const mapped: Profile = {
+          id: String(remote.userId),
+          email: remote.email,
+          nickname: remote.nickname ?? "",
+          department: remote.major ?? "",
+          studentNumber: remote.studentNumber ?? "",
+          grade: remote.studentNumber ? `${remote.studentNumber.slice(0, 2)}학번` : "",
+        };
+        setProfile(mapped);
+        setDraft(mapped);
+        saveProfileForUser(user.id, mapped);
+      } catch {
+        if (!stored && !cancelled) {
+          setProfile(null);
+          setDraft(null);
+        }
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id, isAuthenticated]);
 
   const setDraftProfile = (value: Profile) => {

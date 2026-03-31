@@ -11,10 +11,12 @@ import {
   getPeersForMatchingTab,
   type FreeSlotPeer,
 } from "../mocks/freeSlotPeers";
+import { sanitizeHobbies } from "../constants/hobbyOptions";
 
 function resolveUserHobbies(profile: { hobbies?: string[] } | null): string[] {
   if (profile?.hobbies === undefined) return DEFAULT_USER_HOBBIES;
-  return profile.hobbies;
+  const cleaned = sanitizeHobbies(profile.hobbies);
+  return cleaned.length > 0 ? cleaned : DEFAULT_USER_HOBBIES;
 }
 
 /** DM 상대 식별: 데모는 userId, 일반 목업은 가상 id */
@@ -336,7 +338,18 @@ export function MatchingPage() {
       <UserProfileDialog
         isOpen={isProfileDialogOpen}
         onClose={() => setProfileDialogOpen(false)}
-        user={profilePeer}
+        user={
+          profilePeer
+            ? {
+                department: profilePeer.department,
+                name: profilePeer.name,
+                year: profilePeer.year,
+                todayQuestion: profilePeer.activity,
+                hobbies: profilePeer.hobbies,
+                bio: profilePeer.bio,
+              }
+            : undefined
+        }
       />
     </div>
   );
