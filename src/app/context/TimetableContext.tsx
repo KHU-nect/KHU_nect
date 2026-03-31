@@ -17,6 +17,7 @@ function persistTimetable(userId: string | undefined, courses: TimetableCourse[]
 
 type TimetableContextValue = {
   courses: TimetableCourse[];
+  isTimetableReady: boolean;
   addCourse: (course: TimetableCourse) => void;
   updateCourse: (id: string, course: TimetableCourse) => void;
   removeCourse: (id: string) => void;
@@ -124,6 +125,7 @@ export function TimetableProvider({ children }: { children: ReactNode }) {
     <TimetableContext.Provider
       value={{
         courses,
+        isTimetableReady: loaded,
         addCourse,
         updateCourse,
         removeCourse,

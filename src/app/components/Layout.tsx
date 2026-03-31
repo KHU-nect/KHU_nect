@@ -14,8 +14,8 @@ export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { profile } = useProfile();
-  const { courses } = useTimetable();
+  const { profile, isProfileReady } = useProfile();
+  const { courses, isTimetableReady } = useTimetable();
   const { dismissMatchAlert, inboxRevision } = useDmChat();
   const isOnboarding = location.pathname === "/onboarding" || location.pathname === "/onboarding-profile";
 
@@ -33,6 +33,7 @@ export function Layout() {
 
   // 온보딩을 끝내지 않은 사용자는 /home 진입 시 온보딩으로 유도
   useEffect(() => {
+    if (!isProfileReady || !isTimetableReady) return;
     if (location.pathname.startsWith("/home")) {
       if (!effectiveProfile) {
         navigate("/onboarding-profile", { replace: true });
@@ -40,7 +41,14 @@ export function Layout() {
         navigate("/onboarding", { replace: true });
       }
     }
-  }, [location.pathname, effectiveProfile, courses.length, navigate]);
+  }, [
+    location.pathname,
+    effectiveProfile,
+    courses.length,
+    navigate,
+    isProfileReady,
+    isTimetableReady,
+  ]);
 
   const navItems = [
     { path: "/home/classes", icon: BookOpen, label: "수업" },

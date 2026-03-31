@@ -15,6 +15,7 @@ export type { InterestsTag, Profile } from "../types/profile";
 type ProfileContextValue = {
   profile: Profile | null;
   draftProfile: Profile | null;
+  isProfileReady: boolean;
   setDraftProfile: (profile: Profile) => void;
   saveProfile: () => void;
   commitProfile: (profile: Profile) => void;
@@ -26,12 +27,15 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [draftProfile, setDraft] = useState<Profile | null>(null);
+  const [isProfileReady, setIsProfileReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setIsProfileReady(false);
     if (!isAuthenticated || !user) {
       setProfile(null);
       setDraft(null);
+      setIsProfileReady(true);
       return;
     }
     const run = async () => {
@@ -48,6 +52,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         if (!stored && !cancelled) {
           setProfile(null);
           setDraft(null);
+        }
+        if (!cancelled) {
+          setIsProfileReady(true);
         }
         return;
       }
@@ -70,6 +77,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         if (!stored && !cancelled) {
           setProfile(null);
           setDraft(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsProfileReady(true);
         }
       }
     };
@@ -103,6 +114,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       value={{
         profile,
         draftProfile,
+        isProfileReady,
         setDraftProfile,
         saveProfile,
         commitProfile,
