@@ -248,7 +248,7 @@ export function ClassMatchingPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 max-w-md md:max-w-2xl lg:max-w-3xl mx-auto">
-      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
+      <div className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-30 shadow-sm">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -266,7 +266,7 @@ export function ClassMatchingPage() {
         </div>
       </div>
 
-      <div className="px-4 py-5 space-y-4">
+      <div className="relative z-0 px-4 py-5 space-y-4">
         {user?.id &&
           !isDemoUser &&
           interestsLoaded &&
