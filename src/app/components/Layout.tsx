@@ -13,7 +13,7 @@ import { MatchSuccessModal } from "./MatchSuccessModal";
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { profile, isProfileReady } = useProfile();
   const { courses, isTimetableReady } = useTimetable();
   const { dismissMatchAlert, inboxRevision } = useDmChat();
@@ -35,7 +35,9 @@ export function Layout() {
   useEffect(() => {
     if (!isProfileReady || !isTimetableReady) return;
     if (location.pathname.startsWith("/home")) {
-      if (!effectiveProfile) {
+      if (!isAuthenticated || !user?.id) {
+        navigate("/", { replace: true });
+      } else if (!effectiveProfile) {
         navigate("/onboarding-profile", { replace: true });
       } else if (!courses.length) {
         navigate("/onboarding", { replace: true });
@@ -48,6 +50,8 @@ export function Layout() {
     navigate,
     isProfileReady,
     isTimetableReady,
+    isAuthenticated,
+    user?.id,
   ]);
 
   const navItems = [

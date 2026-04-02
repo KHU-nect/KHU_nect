@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { PageContainer } from "../components/PageContainer";
 import { useAuth } from "../context/AuthContext";
@@ -10,6 +10,7 @@ export function AuthCallbackPage() {
   const { login } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const handledCodeRef = useRef<string | null>(null);
   const code = params.get("code");
   const oauthError = params.get("error");
 
@@ -37,6 +38,10 @@ export function AuthCallbackPage() {
         }
         return;
       }
+      if (handledCodeRef.current === code) {
+        return;
+      }
+      handledCodeRef.current = code;
 
       try {
         const result = await exchangeGoogleCode(code);

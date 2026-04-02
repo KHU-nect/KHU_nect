@@ -8,7 +8,11 @@ export function ClassPage() {
   const { id } = useParams();
   const { courses } = useTimetable();
 
-  const course = courses.find((c) => c.id === id) ?? courses[0];
+  const course = courses.find((c) => {
+    if (c.id === id) return true;
+    if (c.serverCourseId && id === `course-${c.serverCourseId}`) return true;
+    return false;
+  }) ?? courses[0];
   const courseName = course?.name ?? "수업 라운지";
   const professor = course?.professor ?? "";
   const listenerCount = course ? getCourseListenerCount(course) : 0;
@@ -37,7 +41,7 @@ export function ClassPage() {
       </div>
 
       {course?.id ? (
-        <ClassChatThread courseId={course.id} />
+        <ClassChatThread courseId={course.id} serverCourseId={course.serverCourseId} />
       ) : (
         <div className="flex-1 flex items-center justify-center px-6 text-sm text-gray-500">
           시간표에 수업이 없어요.

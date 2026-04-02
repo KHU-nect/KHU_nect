@@ -4,6 +4,7 @@ import { LionAvatar } from "../components/LionAvatar";
 import { UserProfileDialog } from "../components/UserProfileDialog";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useProfile } from "../context/ProfileContext";
 import { useClassChat } from "../context/ClassChatContext";
 import { useDmUnreadCount } from "../hooks/useDmUnreadCount";
 import { useTimetable } from "../context/TimetableContext";
@@ -13,7 +14,16 @@ import {
   groupCoursesBySubject,
 } from "../utils/courseGroups";
 import { getCourseListenerCount } from "../utils/courseListenerCount";
-import { getPeersFreeNow, type FreeSlotPeer } from "../mocks/freeSlotPeers";
+import { getFreePeriodMatches, mapFreePeriodUsersToPeers } from "../api/matchingApi";
+import {
+  getPeersFreeNow,
+  isDemoAccountId,
+  peerCardHeadline,
+  peerCardQuote,
+  type FreeSlotPeer,
+} from "../mocks/freeSlotPeers";
+import { resolveViewerHobbies } from "../utils/resolveViewerHobbies";
+import { useOpenDmFromFreeSlotPeer } from "../hooks/useOpenDmFromFreeSlotPeer";
 
 export function HomePage() {
   const [timeKey, setTimeKey] = useState(0);
@@ -29,16 +39,43 @@ export function HomePage() {
   });
 
   const { user } = useAuth();
+  const { profile } = useProfile();
+  const viewerHobbies = useMemo(() => resolveViewerHobbies(profile), [profile]);
+  const { openDmFromFreeSlotPeer } = useOpenDmFromFreeSlotPeer();
   const { courses } = useTimetable();
   const { getVisibleMessages } = useClassChat();
   const dmUnread = useDmUnreadCount(user?.id);
   const [isProfileDialogOpen, setProfileDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<FreeSlotPeer | undefined>(undefined);
+  const [apiFreeNowPeers, setApiFreeNowPeers] = useState<FreeSlotPeer[]>([]);
 
-  const freeNowPeers = useMemo(
-    () => getPeersFreeNow(now, user?.id),
-    [now, user?.id]
-  );
+  useEffect(() => {
+    if (!user?.id || isDemoAccountId(user.id)) {
+      setApiFreeNowPeers([]);
+      return;
+    }
+    let cancelled = false;
+    void getFreePeriodMatches()
+      .then((rows) => {
+        if (cancelled) return;
+        const mapped = mapFreePeriodUsersToPeers(rows);
+        const self = user.id;
+        setApiFreeNowPeers(mapped.filter((p) => p.userId !== self));
+      })
+      .catch(() => {
+        if (!cancelled) setApiFreeNowPeers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, timeKey]);
+
+  const freeNowPeers = useMemo(() => {
+    if (user?.id && !isDemoAccountId(user.id)) {
+      return apiFreeNowPeers;
+    }
+    return getPeersFreeNow(now, user?.id);
+  }, [now, user?.id, apiFreeNowPeers]);
 
   const handleUserClick = (mate: FreeSlotPeer) => {
     setSelectedUser(mate);
@@ -129,11 +166,14 @@ export function HomePage() {
             {courseGroups.map((group) => {
               const ids = getCourseIdsInGroup(group);
               const previewText = getLatestChatPreviewContent(getVisibleMessages, ids);
+              const routeId = group.slots[0]?.serverCourseId
+                ? `course-${group.slots[0].serverCourseId}`
+                : group.representativeId;
 
               return (
               <Link
                 key={group.representativeId}
-                to={`/home/class/${group.representativeId}`}
+                to={`/home/class/${routeId}`}
                 className="block p-4 rounded-xl border-2 border-gray-100 hover:border-[#E6A620] transition-all"
               >
                 <div className="flex items-start justify-between mb-2">
@@ -177,12 +217,12 @@ export function HomePage() {
           </div>
         </div>
 
-        {/* 공강 메이트 - 지금 공강인 쿠옹이들 */}
+        {/* 공강 메이트 - 시간표 겹침 기준 */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Footprints className="w-6 h-6" style={{ color: "#E6A620" }} />
-              <h3 className="text-lg font-bold text-gray-800">지금 공강인 쿠옹이들</h3>
+              <h3 className="text-lg font-bold text-gray-800">공강이 겹치는 쿠옹이들</h3>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ backgroundColor: "#FDF5E6" }}>
               <Users className="w-4 h-4" style={{ color: "#E6A620" }} />
@@ -193,7 +233,7 @@ export function HomePage() {
           <div className="space-y-3 max-h-[min(520px,70vh)] overflow-y-auto pr-1">
             {freeNowPeers.length === 0 ? (
               <p className="text-sm text-gray-500 text-center py-6">
-                지금 이 시간대에 공강인 쿠옹이가 없어요. 잠시 후 다시 확인해 보세요!
+                시간표 기준으로 겹치는 공강이 있는 쿠옹이가 없어요. 잠시 후 다시 확인해 보세요!
               </p>
             ) : (
               freeNowPeers.map((mate) => (
@@ -251,7 +291,27 @@ export function HomePage() {
       <UserProfileDialog
         isOpen={isProfileDialogOpen}
         onClose={() => setProfileDialogOpen(false)}
-        user={selectedUser}
+        viewerHobbies={user?.id && !isDemoAccountId(user.id) ? viewerHobbies : undefined}
+        onSendMessage={() => {
+          const peer = selectedUser;
+          setProfileDialogOpen(false);
+          if (peer) void openDmFromFreeSlotPeer(peer);
+        }}
+        onRequestMatch={() => setProfileDialogOpen(false)}
+        user={
+          selectedUser
+            ? {
+                department: selectedUser.department,
+                name: selectedUser.name,
+                year: selectedUser.year,
+                todayQuestion: selectedUser.todayQuestion,
+                activity: selectedUser.activity,
+                hobbies: selectedUser.hobbies,
+                bio: selectedUser.bio,
+                matchingRate: selectedUser.matchingRate,
+              }
+            : undefined
+        }
       />
     </div>
   );

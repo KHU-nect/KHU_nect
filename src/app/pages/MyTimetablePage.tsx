@@ -332,7 +332,7 @@ export function MyTimetablePage() {
           <h2 className="text-sm font-bold text-gray-700 px-1">등록된 수업</h2>
           {groups.length === 0 ? (
             <p className="text-sm text-gray-500 px-1 py-6 text-center bg-white rounded-xl border border-gray-100">
-              아직 등록된 수업이 없어요. 검색하거나 직접 입력해 주세요.
+              아직 등록된 수업이 없어요. 검색해서 추가해 주세요.
             </p>
           ) : (
             groups.map((g) => (

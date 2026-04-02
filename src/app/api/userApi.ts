@@ -13,6 +13,18 @@ type MyProfileResponse = {
   major: string;
   studentNumber: string;
   signupCompleted: boolean;
+  point?: number;
+  level?: number;
+  interests?: Array<{ interestId: number; name: string }>;
+  bio?: string | null;
+  todayQuestion?: string | null;
+};
+
+export type UpdateMyProfilePayload = {
+  nickname: string;
+  major: string;
+  bio?: string;
+  todayQuestion?: string;
 };
 
 export async function completeSignup(payload: SignupCompletionRequest) {
@@ -27,7 +39,7 @@ export async function getMyProfile() {
   return apiRequest<MyProfileResponse>("/api/users/me");
 }
 
-export async function updateMyProfile(payload: { nickname: string; major: string }) {
+export async function updateMyProfile(payload: UpdateMyProfilePayload) {
   return apiRequest<MyProfileResponse>("/api/users/me", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

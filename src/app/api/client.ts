@@ -2,6 +2,7 @@ const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8080";
 
 const ACCESS_TOKEN_KEY = "khu-nect_access_token";
+const REFRESH_TOKEN_KEY = "khu-nect_refresh_token";
 
 export type FieldErrorDetail = {
   field: string;
@@ -37,29 +38,74 @@ function getAccessToken(): string | null {
   return window.localStorage.getItem(ACCESS_TOKEN_KEY);
 }
 
+function getRefreshToken(): string | null {
+  return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+function saveTokens(accessToken: string, refreshToken: string) {
+  window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
+function clearTokens() {
+  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  const res = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ refreshToken }),
+  });
+  let parsed: ApiResponse<{ accessToken: string; refreshToken: string }> | null = null;
+  try {
+    parsed = (await res.json()) as ApiResponse<{ accessToken: string; refreshToken: string }>;
+  } catch {
+    return null;
+  }
+  if (!res.ok || !parsed.success || !parsed.data) {
+    clearTokens();
+    return null;
+  }
+  saveTokens(parsed.data.accessToken, parsed.data.refreshToken);
+  return parsed.data.accessToken;
+}
+
 export async function apiRequest<T>(
   path: string,
   init?: RequestInit & { auth?: boolean }
 ): Promise<T> {
   const { auth = true, headers, ...rest } = init ?? {};
-  const requestHeaders = new Headers(headers ?? {});
-  requestHeaders.set("Accept", "application/json");
-
-  if (auth) {
-    const token = getAccessToken();
-    if (!token) {
-      throw new ApiError("로그인이 필요합니다.", 401, {
-        code: "AUTH-401",
-        message: "인증 토큰이 없습니다.",
-      });
+  const perform = async (tokenOverride?: string) => {
+    const requestHeaders = new Headers(headers ?? {});
+    requestHeaders.set("Accept", "application/json");
+    if (auth) {
+      const token = tokenOverride ?? getAccessToken();
+      if (!token) {
+        throw new ApiError("로그인이 필요합니다.", 401, {
+          code: "AUTH-401",
+          message: "인증 토큰이 없습니다.",
+        });
+      }
+      requestHeaders.set("Authorization", `Bearer ${token}`);
     }
-    requestHeaders.set("Authorization", `Bearer ${token}`);
-  }
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...rest,
+      headers: requestHeaders,
+    });
+  };
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...rest,
-    headers: requestHeaders,
-  });
+  let response = await perform();
+
+  if (auth && response.status === 401) {
+    const newAccessToken = await refreshAccessToken();
+    if (newAccessToken) {
+      response = await perform(newAccessToken);
+    }
+  }
 
   let parsed: ApiResponse<T> | null = null;
   try {

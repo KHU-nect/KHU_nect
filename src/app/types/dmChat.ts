@@ -7,7 +7,7 @@ export type DmMessage = {
 
 export type DmRoom = {
   id: string;
-  participantIds: [string, string];
+  participantIds: [string, string] | string[];
   /** 수업에서 같이 앉기로 연결된 경우 */
   sourceCourseId?: string;
   /** 같이 앉기 / 공강 매칭 등 */
@@ -15,4 +15,6 @@ export type DmRoom = {
   labelsByUserId: Record<string, string>;
   messages: DmMessage[];
   createdAt: string;
+  /** 서버 direct-chat에서 내려온 방인지 여부 */
+  isServerRoom?: boolean;
 };

@@ -1,6 +1,12 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
 import type { UserProfile } from "../mocks/user";
-import { clearAuthTokens } from "../utils/backendAuth";
+import {
+  clearAuthTokens,
+  getMyAuthInfo,
+  getStoredAccessToken,
+  getStoredRefreshToken,
+  logoutToBackend,
+} from "../utils/backendAuth";
 
 type AuthState = {
   isAuthenticated: boolean;
@@ -42,14 +48,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const login = (user: UserProfile) => {
-    setState({ isAuthenticated: true, user });
-  };
+  useEffect(() => {
+    let cancelled = false;
+    const accessToken = getStoredAccessToken();
+    if (!accessToken) return;
+    const run = async () => {
+      try {
+        const me = await getMyAuthInfo();
+        if (cancelled) return;
+        setState({ isAuthenticated: true, user: me.user });
+      } catch {
+        if (cancelled) return;
+        clearAuthTokens();
+        setState({ isAuthenticated: false, user: null });
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const logout = () => {
+  const login = useCallback((user: UserProfile) => {
+    setState({ isAuthenticated: true, user });
+  }, []);
+
+  const logout = useCallback(() => {
+    const refreshToken = getStoredRefreshToken();
+    if (refreshToken) {
+      void logoutToBackend(refreshToken);
+    }
     clearAuthTokens();
     setState({ isAuthenticated: false, user: null });
-  };
+  }, []);
 
   return (
     <AuthContext.Provider

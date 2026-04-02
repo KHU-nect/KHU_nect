@@ -112,8 +112,10 @@ function maskedStudentNumber(studentNumber?: string, fallback = "2026****"): str
 export function MyPage() {
   const navigate = useNavigate();
   const { courses } = useTimetable();
-  const { user: authUser } = useAuth();
+  const { user: authUser, logout } = useAuth();
   const { profile, commitProfile } = useProfile();
+  const isValidNickname = (value: string) => /^[A-Za-z0-9가-힣_]{2,20}$/.test(value.trim());
+  const isValidMajor = (value: string) => value.trim().length >= 2 && value.trim().length <= 50;
 
   const user = {
     department: profile?.department ?? "도예학과",
@@ -227,6 +229,14 @@ export function MyPage() {
       setProfileSaveError("닉네임과 전공을 입력해주세요.");
       return;
     }
+    if (!isValidNickname(editNickname)) {
+      setProfileSaveError("닉네임은 2~20자, 한글/영문/숫자/_만 입력할 수 있어요.");
+      return;
+    }
+    if (!isValidMajor(editMajor)) {
+      setProfileSaveError("전공은 2~50자로 입력해주세요.");
+      return;
+    }
     if (!/^\d{10}$/.test(editStudentNumber)) {
       setProfileSaveError("학번은 숫자 10자리로 입력해주세요.");
       return;
@@ -234,21 +244,39 @@ export function MyPage() {
     setIsSavingProfile(true);
     setProfileSaveError(null);
     try {
+      const nextBio = editBio.trim();
+      const nextTq = editTodayQuestion.trim();
       if (!authUser.id.startsWith("demo-user-")) {
-        await updateMyProfile({
+        const remote = await updateMyProfile({
           nickname: editNickname.trim(),
           major: editMajor.trim(),
+          bio: nextBio,
+          todayQuestion: nextTq,
+        });
+        const bioFromServer =
+          remote.bio != null ? String(remote.bio).trim() : nextBio;
+        const tqFromServer =
+          remote.todayQuestion != null ? String(remote.todayQuestion).trim() : nextTq;
+        commitProfile({
+          ...profile,
+          nickname: remote.nickname ?? editNickname.trim(),
+          department: remote.major ?? editMajor.trim(),
+          studentNumber: editStudentNumber,
+          grade: `${editStudentNumber.slice(0, 2)}학번`,
+          bio: bioFromServer || undefined,
+          todayQuestion: tqFromServer || undefined,
+        });
+      } else {
+        commitProfile({
+          ...profile,
+          nickname: editNickname.trim(),
+          department: editMajor.trim(),
+          studentNumber: editStudentNumber,
+          grade: `${editStudentNumber.slice(0, 2)}학번`,
+          todayQuestion: nextTq || undefined,
+          bio: nextBio || undefined,
         });
       }
-      commitProfile({
-        ...profile,
-        nickname: editNickname.trim(),
-        department: editMajor.trim(),
-        studentNumber: editStudentNumber,
-        grade: `${editStudentNumber.slice(0, 2)}학번`,
-        todayQuestion: editTodayQuestion.trim() ? editTodayQuestion.trim() : undefined,
-        bio: editBio.trim() ? editBio.trim() : undefined,
-      });
       setProfileEditOpen(false);
     } catch (e) {
       if (e instanceof ApiError) setProfileSaveError(e.message);
@@ -822,7 +850,10 @@ export function MyPage() {
 
         {/* Logout */}
         <button 
-          onClick={() => navigate('/')}
+          onClick={() => {
+            logout();
+            navigate("/");
+          }}
           className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors"
         >
           <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100">
@@ -850,10 +881,10 @@ export function MyPage() {
               <Input
                 value={editNickname}
                 onChange={(e) => setEditNickname(e.target.value)}
-                maxLength={12}
+                maxLength={20}
                 placeholder="쿠옹이님"
               />
-              <p className="text-xs text-gray-500">최대 12자까지 입력 가능합니다</p>
+              <p className="text-xs text-gray-500">2~20자, 한글/영문/숫자/_만 입력 가능합니다</p>
             </div>
 
             <div className="space-y-2">

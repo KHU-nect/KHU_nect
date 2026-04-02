@@ -6,6 +6,9 @@
  */
 export type TimetableCourse = {
   id: string;
+  serverCourseId?: number;
+  /** GET /api/timetable/me 의 `studentCount` — 해당 과목 시간표에 등록한 사용자 수 */
+  studentCount?: number;
   name: string;
   professor: string;
   days: string[];

@@ -1,25 +1,47 @@
+import { DEMO_ACCOUNTS } from "./demoAccounts";
+import { isBusyNowFromTimetable } from "../utils/freeSlotFromTimetable";
 import { parseHHMM } from "../utils/timetableGrid";
+import { readTimetableSnapshotForUser } from "../utils/timetableStorage";
 
 const DAY_LABELS_KO = ["일", "월", "화", "수", "목", "금", "토"] as const;
 
 export type FreeSlotPeer = {
   id: number;
+  matchPostId?: number;
   /** 데모 계정(demo-user-1 …)과 매핑될 때만 설정 */
   userId?: string;
   department: string;
   name: string;
   year: string;
+  /** 프로필·오늘의 질문용 (API 미제공 시 비움) */
   activity: string;
+  /** 매칭 카드·목록 한 줄 (공강 요약 등). 없으면 activity 사용 */
+  slotSummary?: string;
+  /** API가 주는 오늘의 질문 */
+  todayQuestion?: string;
   tag: string;
   hobbies: string[];
   bio: string;
-  matchingRate: number;
+  matchingRate?: number;
   time: string;
   location: string;
   freeDays: string[];
   freeStart: string;
   freeEnd: string;
 };
+
+/** 카드·리스트 제목: 학과 있으면 「OO과 쿠옹이」, 없으면 닉네임 또는 「쿠옹이」 */
+export function peerCardHeadline(peer: Pick<FreeSlotPeer, "name" | "department">): string {
+  const d = peer.department?.trim();
+  if (d) return `${d} 쿠옹이`;
+  const n = peer.name?.trim();
+  if (n) return n;
+  return "쿠옹이";
+}
+
+export function peerCardQuote(peer: Pick<FreeSlotPeer, "slotSummary" | "activity">): string {
+  return peer.slotSummary?.trim() || peer.activity?.trim() || "";
+}
 
 const DEMO_ACCOUNT_IDS = new Set([
   "demo-user-1",
@@ -135,9 +157,49 @@ export function isPeerFreeNow(peer: FreeSlotPeer, now: Date = new Date()): boole
   return cur >= start && cur < end;
 }
 
+/**
+ * 데모 계정: localStorage에 저장된 시간표 기준으로, 지금 수업 슬롯에 없는 사용자만 공강으로 표시.
+ * 시간표가 비어 있으면 목록에서 제외합니다.
+ */
+export function freeSlotPeersFromDemoAccounts(now: Date, excludeUserId?: string): FreeSlotPeer[] {
+  const peers: FreeSlotPeer[] = [];
+  for (const account of DEMO_ACCOUNTS) {
+    if (account.id === excludeUserId) continue;
+    const courses = readTimetableSnapshotForUser(account.id);
+    if (courses.length === 0) continue;
+    if (isBusyNowFromTimetable(courses, now)) continue;
+    const template = DEMO_FREE_SLOT_PEERS.find((p) => p.userId === account.id);
+    if (template) {
+      peers.push({
+        ...template,
+        activity: `${template.activity} · 지금은 시간표상 공강`,
+      });
+    } else {
+      peers.push({
+        id: 200 + peers.length,
+        userId: account.id,
+        department: account.department,
+        name: account.nickname,
+        year: account.grade,
+        activity: "지금 공강이에요 (시간표 기준)",
+        tag: "#공강",
+        hobbies: [],
+        bio: "",
+        matchingRate: 0,
+        time: "지금",
+        location: "캠퍼스",
+        freeDays: [...WEEK_ALL],
+        freeStart: "00:00",
+        freeEnd: "23:59",
+      });
+    }
+  }
+  return peers;
+}
+
 function peersFreeForUser(now: Date, currentUserId: string | undefined): FreeSlotPeer[] {
   if (isDemoAccountId(currentUserId)) {
-    return DEMO_FREE_SLOT_PEERS.filter((p) => p.userId !== currentUserId);
+    return freeSlotPeersFromDemoAccounts(now, currentUserId);
   }
   return FREE_SLOT_PEERS.filter((p) => isPeerFreeNow(p, now));
 }

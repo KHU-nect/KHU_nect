@@ -70,6 +70,9 @@ export function OnboardingProfilePage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const isValidNickname = (value: string) => /^[A-Za-z0-9가-힣_]{2,20}$/.test(value.trim());
+  const isValidMajor = (value: string) => value.trim().length >= 2 && value.trim().length <= 50;
+
   // 이미 저장된 프로필이 있으면 폼 초기값으로 사용
   useEffect(() => {
     const source = draftProfile ?? profile;
@@ -96,6 +99,14 @@ export function OnboardingProfilePage() {
     }
     if (!/^\d{10}$/.test(studentNumber)) {
       setSubmitError("학번은 숫자 10자리로 입력해주세요.");
+      return;
+    }
+    if (!isValidNickname(nickname)) {
+      setSubmitError("닉네임은 2~20자, 한글/영문/숫자/_만 입력할 수 있어요.");
+      return;
+    }
+    if (!isValidMajor(department)) {
+      setSubmitError("전공은 2~50자로 입력해주세요.");
       return;
     }
 
@@ -142,7 +153,7 @@ export function OnboardingProfilePage() {
   };
 
   const isFormValid =
-    nickname.trim() !== "" && department !== "" && /^\d{10}$/.test(studentNumber);
+    isValidNickname(nickname) && isValidMajor(department) && /^\d{10}$/.test(studentNumber);
 
   return (
     <PageContainer>
@@ -184,10 +195,10 @@ export function OnboardingProfilePage() {
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
             placeholder="쿠옹이123"
-            maxLength={12}
+            maxLength={20}
             className="w-full h-12 px-4 rounded-xl border-2 border-gray-200 focus:border-[#A71930] focus:outline-none transition-colors"
           />
-          <p className="text-xs text-gray-500">최대 12자까지 입력 가능합니다</p>
+          <p className="text-xs text-gray-500">2~20자, 한글/영문/숫자/_만 입력 가능합니다</p>
         </div>
 
         {/* Department Select */}

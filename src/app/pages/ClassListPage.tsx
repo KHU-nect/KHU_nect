@@ -63,11 +63,14 @@ export function ClassListPage() {
         {courseGroups.map((group) => {
           const ids = getCourseIdsInGroup(group);
           const previewText = getLatestChatPreviewContent(getVisibleMessages, ids);
+          const routeId = group.slots[0]?.serverCourseId
+            ? `course-${group.slots[0].serverCourseId}`
+            : group.representativeId;
 
           return (
           <Link
             key={group.representativeId}
-            to={`/home/class/${group.representativeId}`}
+            to={`/home/class/${routeId}`}
             className="block bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:border-[#E6A620] transition-all"
           >
             {/* Course Header */}

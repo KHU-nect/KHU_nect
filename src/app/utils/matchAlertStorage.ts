@@ -40,6 +40,17 @@ export function setMatchAlertsForBothUsers(
   save(map);
 }
 
+/** 서버 매칭 수락 등 — 이 기기에서 보는 사용자 한 명만 알림 저장 */
+export function setMatchAlertForUser(userId: string, roomId: string, peerLabel: string) {
+  const map = load();
+  map[userId] = {
+    roomId,
+    peerLabel: peerLabel.trim() || "쿠옹이",
+    matchedAt: new Date().toISOString(),
+  };
+  save(map);
+}
+
 export function dismissMatchAlert(userId: string) {
   const map = load();
   if (map[userId]) {

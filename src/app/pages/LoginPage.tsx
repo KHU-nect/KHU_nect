@@ -12,7 +12,9 @@ export function LoginPage() {
   const { login, logout, isAuthenticated, user } = useAuth();
 
   const handleMainLogin = () => {
-    window.location.href = getGoogleLoginStartUrl();
+    const url = getGoogleLoginStartUrl();
+    console.log("[auth] login start redirect", { url });
+    window.location.href = url;
   };
 
   const handleDemoLogin = (account: UserProfile) => {

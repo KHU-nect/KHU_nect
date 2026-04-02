@@ -62,6 +62,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       try {
         const remote = await getMyProfile();
         if (cancelled) return;
+        const bioTrim = remote.bio != null ? String(remote.bio).trim() : "";
+        const tqTrim =
+          remote.todayQuestion != null ? String(remote.todayQuestion).trim() : "";
         const mapped: Profile = {
           id: String(remote.userId),
           email: remote.email,
@@ -69,6 +72,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
           department: remote.major ?? "",
           studentNumber: remote.studentNumber ?? "",
           grade: remote.studentNumber ? `${remote.studentNumber.slice(0, 2)}학번` : "",
+          bio: bioTrim || undefined,
+          todayQuestion: tqTrim || undefined,
         };
         setProfile(mapped);
         setDraft(mapped);

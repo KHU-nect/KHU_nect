@@ -12,6 +12,8 @@ export type TimetableEntryResponse = {
   classroom: string;
   semesterYear: number;
   semesterTerm: string;
+  /** 이 과목(동일 수업) 시간표에 등록한 사용자 수 */
+  studentCount?: number;
 };
 
 function normalizeTime(t: string): string {
@@ -41,6 +43,11 @@ export function timetableEntryToCourse(entry: TimetableEntryResponse): Timetable
   const parsed = parseScheduleText(entry.scheduleText);
   return {
     id: `server-${entry.entryId}`,
+    serverCourseId: entry.courseId,
+    studentCount:
+      typeof entry.studentCount === "number" && Number.isFinite(entry.studentCount)
+        ? Math.max(0, Math.floor(entry.studentCount))
+        : undefined,
     name: entry.courseName,
     professor: entry.professorName,
     days: parsed.days,
@@ -67,5 +74,17 @@ export async function deleteTimetableEntry(entryId: number) {
   return apiRequest<string>(`/api/timetable/${entryId}`, {
     method: "DELETE",
   });
+}
+
+/** 서버가 시간표 기준으로 현재 수업이 없는 사용자 목록을 줄 때 사용 (엔드포인트 미구현 시 404 등) */
+export type TimetableFreeNowUserDTO = {
+  userId: number;
+  nickname: string;
+  major?: string | null;
+  studentNumber?: string | null;
+};
+
+export async function getUsersFreeNowByTimetable() {
+  return apiRequest<TimetableFreeNowUserDTO[]>("/api/timetable/users-free-now");
 }
 

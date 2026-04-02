@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState, type MouseEvent } from "react";
-import { ArrowLeft, BookOpen, Users, MessageCircle } from "lucide-react";
-import { useNavigate } from "react-router";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { ArrowLeft, BookOpen, Filter, MessageCircle, Users } from "lucide-react";
+import { Link, useNavigate } from "react-router";
 import { LionAvatar } from "../components/LionAvatar";
 import { UserProfileDialog } from "../components/UserProfileDialog";
 import { useAuth } from "../context/AuthContext";
@@ -8,52 +8,242 @@ import { useDmChat } from "../context/DmChatContext";
 import { useProfile } from "../context/ProfileContext";
 import { useTimetable } from "../context/TimetableContext";
 import {
+  classMatchUserDtoToBackendRow,
+  getClassMatches,
+  acceptMatching,
+  type ClassMatchMateRow,
+} from "../api/matchingApi";
+import { getMyInterests, type MyInterest } from "../api/interestApi";
+import { acceptMatchPost } from "../api/matchPostApi";
+import {
   computeClassMatches,
   firstSharedCourseId,
   isDemoAccountUserId,
-  type ClassMatchComputed,
 } from "../mocks/classMatchPeers";
+import { resolveViewerHobbies } from "../utils/resolveViewerHobbies";
+
+type BackendClassMate = ClassMatchMateRow;
 
 export function ClassMatchingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { profile } = useProfile();
   const { courses } = useTimetable();
-  const { createRoomFromClassMatch } = useDmChat();
+  const {
+    createRoomFromClassMatch,
+    refreshServerRooms,
+    prefetchDirectChatRoom,
+    recordMatchSuccessAlert,
+  } = useDmChat();
   const [isProfileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<ClassMatchComputed | undefined>(undefined);
+  const [selectedUser, setSelectedUser] = useState<BackendClassMate | undefined>(undefined);
+  const [backendMates, setBackendMates] = useState<BackendClassMate[]>([]);
+  const [loadingMates, setLoadingMates] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState<"all" | string>("all");
+  const [interestIdByName, setInterestIdByName] = useState<Record<string, number>>({});
+  const [myInterests, setMyInterests] = useState<MyInterest[]>([]);
+  const [interestsLoaded, setInterestsLoaded] = useState(false);
 
-  const mates = useMemo(
-    () => computeClassMatches(courses, { excludeUserId: user?.id }),
-    [courses, user?.id]
-  );
+  const userHobbies = useMemo(() => resolveViewerHobbies(profile), [profile]);
+
+  const mates = useMemo(() => {
+    if (!isDemoAccountUserId(user?.id)) return backendMates;
+    const raw = computeClassMatches(courses, { excludeUserId: user?.id });
+    if (selectedFilter === "all") return raw;
+    return raw.filter((m) => m.hobbies.includes(selectedFilter));
+  }, [courses, user?.id, backendMates, selectedFilter]);
 
   const isDemoUser = isDemoAccountUserId(user?.id);
+
+  const filterChips = useMemo(() => {
+    const chips: { id: "all" | string; label: string }[] = [{ id: "all", label: "전체" }];
+    if (isDemoUser || !user?.id) {
+      userHobbies.forEach((h) => chips.push({ id: h, label: h }));
+    } else {
+      myInterests.forEach((i) => chips.push({ id: i.name, label: i.name }));
+    }
+    return chips;
+  }, [isDemoUser, user?.id, userHobbies, myInterests]);
+
+  useEffect(() => {
+    if (!user?.id || isDemoUser) {
+      setInterestIdByName({});
+      setMyInterests([]);
+      setInterestsLoaded(false);
+      return;
+    }
+    let cancelled = false;
+    setInterestsLoaded(false);
+    void getMyInterests()
+      .then((list) => {
+        if (cancelled) return;
+        const m: Record<string, number> = {};
+        const cleaned: MyInterest[] = [];
+        const seen = new Set<string>();
+        for (const i of list) {
+          const n = i?.name?.trim();
+          if (!n || i.interestId == null || seen.has(n)) continue;
+          seen.add(n);
+          m[n] = i.interestId;
+          cleaned.push({ interestId: i.interestId, name: n });
+        }
+        setInterestIdByName(m);
+        setMyInterests(cleaned);
+        setInterestsLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setInterestIdByName({});
+          setMyInterests([]);
+          setInterestsLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, isDemoUser]);
+
+  useEffect(() => {
+    if (selectedFilter === "all") return;
+    if (isDemoUser) {
+      if (!userHobbies.includes(selectedFilter)) setSelectedFilter("all");
+    } else {
+      if (!myInterests.some((i) => i.name === selectedFilter)) setSelectedFilter("all");
+    }
+  }, [userHobbies, myInterests, selectedFilter, isDemoUser]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user?.id || isDemoUser) {
+      setBackendMates([]);
+      setLoadingMates(false);
+      return;
+    }
+    if (selectedFilter !== "all" && !interestsLoaded) {
+      setLoadingMates(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const run = async () => {
+      setLoadingMates(true);
+      try {
+        let interestId: number | undefined;
+        if (selectedFilter !== "all") {
+          const id = interestIdByName[selectedFilter];
+          if (id != null && Number.isFinite(id)) interestId = id;
+        }
+        const rows = await getClassMatches(interestId);
+        if (cancelled) return;
+        let list = rows
+          .map((d, i) => classMatchUserDtoToBackendRow(d, courses, i))
+          .filter((m): m is BackendClassMate => m != null)
+          .filter((m) => m.userId !== user.id);
+        if (
+          selectedFilter !== "all" &&
+          (interestId === undefined || interestIdByName[selectedFilter] == null)
+        ) {
+          list = list.filter((m) => m.hobbies.includes(selectedFilter));
+        }
+        list.sort((a, b) => {
+          if (b.sharedCount !== a.sharedCount) return b.sharedCount - a.sharedCount;
+          return b.matchingRate - a.matchingRate;
+        });
+        setBackendMates(list);
+      } catch {
+        if (!cancelled) setBackendMates([]);
+      } finally {
+        if (!cancelled) setLoadingMates(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    user?.id,
+    isDemoUser,
+    selectedFilter,
+    interestIdByName,
+    interestsLoaded,
+    courses,
+  ]);
 
   const accepterLabel = useMemo(() => {
     const dept = profile?.department?.trim();
     return dept ? `${dept} 쿠옹이` : "쿠옹이";
   }, [profile?.department]);
 
-  const handleUserClick = (mate: ClassMatchComputed) => {
+  const handleUserClick = (mate: BackendClassMate) => {
     setSelectedUser(mate);
     setProfileDialogOpen(true);
   };
 
   const handleStartChat = useCallback(
-    (e: MouseEvent<HTMLButtonElement>, mate: ClassMatchComputed) => {
+    (e: MouseEvent<HTMLButtonElement>, mate: BackendClassMate) => {
       e.stopPropagation();
       if (!user?.id) return;
-      const sourceCourseId = firstSharedCourseId(courses, mate.sharedKeys);
-      createRoomFromClassMatch({
-        posterUserId: mate.userId,
-        accepterUserId: user.id,
-        posterLabel: mate.name,
-        accepterLabel,
-        sourceCourseId,
-      });
+
+      const openChatSoon = (roomId: string) => {
+        window.setTimeout(() => {
+          navigate(`/home/chat?dm=${encodeURIComponent(roomId)}`);
+        }, 0);
+      };
+
+      const numericUserId = /^\d+$/.test(mate.userId) ? Number(mate.userId) : NaN;
+
+      const acceptWithLocal = () => {
+        const sourceCourseId = firstSharedCourseId(courses, mate.sharedKeys);
+        const roomId = createRoomFromClassMatch({
+          posterUserId: mate.userId,
+          accepterUserId: user.id,
+          posterLabel: mate.name,
+          accepterLabel,
+          sourceCourseId,
+        });
+        openChatSoon(roomId);
+      };
+
+      void (async () => {
+        try {
+          if (mate.matchPostId != null) {
+            const accepted = await acceptMatchPost(mate.matchPostId);
+            await refreshServerRooms();
+            const roomId = String(accepted.directChatRoomId);
+            await prefetchDirectChatRoom(roomId);
+            recordMatchSuccessAlert(user.id, roomId, mate.name);
+            openChatSoon(roomId);
+            return;
+          }
+          if (!isDemoUser && Number.isFinite(numericUserId)) {
+            const { directChatRoomId } = await acceptMatching(numericUserId);
+            await refreshServerRooms();
+            await prefetchDirectChatRoom(directChatRoomId);
+            recordMatchSuccessAlert(user.id, directChatRoomId, mate.name);
+            openChatSoon(directChatRoomId);
+            return;
+          }
+          acceptWithLocal();
+        } catch {
+          if (!isDemoUser && Number.isFinite(numericUserId)) {
+            window.alert("채팅방을 열지 못했어요. 잠시 후 다시 시도해 주세요.");
+            return;
+          }
+          acceptWithLocal();
+        }
+      })();
     },
-    [user?.id, courses, createRoomFromClassMatch, accepterLabel]
+    [
+      user?.id,
+      isDemoUser,
+      courses,
+      createRoomFromClassMatch,
+      accepterLabel,
+      refreshServerRooms,
+      prefetchDirectChatRoom,
+      recordMatchSuccessAlert,
+      navigate,
+    ]
   );
 
   return (
@@ -77,6 +267,61 @@ export function ClassMatchingPage() {
       </div>
 
       <div className="px-4 py-5 space-y-4">
+        {user?.id &&
+          !isDemoUser &&
+          interestsLoaded &&
+          myInterests.length === 0 && (
+            <div className="rounded-2xl border-2 border-amber-200 bg-[#FDF5E6] px-4 py-3 text-sm text-gray-700">
+              <p className="font-semibold text-[#A71930] mb-1">취미·관심사를 추가해 주세요</p>
+              <p className="text-xs text-gray-600 mb-2">
+                마이페이지에서 관심사를 등록하면 수업 매칭 필터와 API 질의에 반영됩니다.
+              </p>
+              <Link
+                to="/home/mypage"
+                className="inline-block text-sm font-semibold underline"
+                style={{ color: "#A71930" }}
+              >
+                마이페이지로 이동
+              </Link>
+            </div>
+          )}
+
+        {user?.id && (
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {filterChips.map(({ id, label }) => {
+              const active = selectedFilter === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setSelectedFilter(id)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all flex-shrink-0 ${
+                    active ? "shadow-sm" : "bg-white hover:shadow-sm"
+                  }`}
+                  style={{
+                    backgroundColor: active ? "#FDF5E6" : "white",
+                    borderWidth: "2px",
+                    borderColor: active ? "#E6A620" : "#E5E7EB",
+                  }}
+                >
+                  {id === "all" && (
+                    <Filter
+                      className="w-4 h-4"
+                      style={{ color: active ? "#E6A620" : "#9CA3AF" }}
+                    />
+                  )}
+                  <span
+                    className="font-semibold text-sm max-w-[140px] truncate"
+                    style={{ color: active ? "#E6A620" : "#6B7280" }}
+                  >
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div
           className="rounded-2xl p-4 border-2"
           style={{ backgroundColor: "#FDF5E6", borderColor: "#E6A620" }}
@@ -90,21 +335,17 @@ export function ClassMatchingPage() {
               <p className="text-xs text-gray-600">
                 {isDemoUser
                   ? "데모 계정 5명끼리 같은 시드 시간표로 수업이 겹쳐요. 공통 수업이 많은 순으로 보여요."
-                  : "수업 매칭 목록은 데모 계정(demo1~5@khu.ac.kr)으로 로그인하면 테스트할 수 있어요."}
+                  : "같은 수업(commonCourses)을 듣는 쿠옹이예요. 칩으로 관심사(interestId)를 좁힐 수 있어요."}
               </p>
             </div>
           </div>
         </div>
 
-        {!isDemoUser ? (
+        {loadingMates && !isDemoUser ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
-            <p className="text-sm text-gray-600 leading-relaxed">
-              수업 매칭은 데모 계정 5명으로만 표시됩니다.
-              <br />
-              마이페이지 등에서 demo1@khu.ac.kr ~ demo5@khu.ac.kr 로 전환해 보세요.
-            </p>
+            <p className="text-sm text-gray-600">수업 매칭 목록을 불러오는 중이에요.</p>
           </div>
-        ) : courses.length === 0 ? (
+        ) : isDemoUser && courses.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
             <p className="text-sm text-gray-600">시간표에 수업을 추가하면 매칭할 수 있어요.</p>
             <button
@@ -118,7 +359,11 @@ export function ClassMatchingPage() {
           </div>
         ) : mates.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
-            <p className="text-sm text-gray-600">지금은 공통 수업이 있는 다른 데모 쿠옹이가 없어요.</p>
+            <p className="text-sm text-gray-600">
+              {isDemoUser
+                ? "지금은 공통 수업이 있는 다른 데모 쿠옹이가 없어요."
+                : "조건에 맞는 쿠옹이가 아직 없어요. 시간표·관심사 칩을 바꿔 보거나 나중에 다시 확인해 주세요."}
+            </p>
           </div>
         ) : (
           <>
@@ -132,7 +377,7 @@ export function ClassMatchingPage() {
             <div className="space-y-3">
               {mates.map((mate) => (
                 <div
-                  key={mate.userId}
+                  key={mate.id}
                   role="button"
                   tabIndex={0}
                   onClick={() => handleUserClick(mate)}
@@ -224,6 +469,7 @@ export function ClassMatchingPage() {
                 hobbies: selectedUser.hobbies,
                 bio: selectedUser.bio,
                 matchingRate: selectedUser.matchingRate,
+                todayQuestion: selectedUser.todayQuestion,
               }
             : undefined
         }
