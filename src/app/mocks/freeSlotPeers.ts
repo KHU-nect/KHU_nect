@@ -1,5 +1,10 @@
 import { DEMO_ACCOUNTS } from "./demoAccounts";
 import { isBusyNowFromTimetable } from "../utils/freeSlotFromTimetable";
+import {
+  buildHomeFreePillFromCommonSlots,
+  formatFreeRangeKorean,
+  type SlotLike,
+} from "../utils/freeSlotPillLabel";
 import { parseHHMM } from "../utils/timetableGrid";
 import { readTimetableSnapshotForUser } from "../utils/timetableStorage";
 
@@ -19,6 +24,10 @@ export type FreeSlotPeer = {
   slotSummary?: string;
   /** API가 주는 오늘의 질문 */
   todayQuestion?: string;
+  /** GET 공강 매칭 응답 슬롯 — 있으면 홈 pill을 `now` 기준 오늘 구간으로 계산 */
+  commonFreeSlots?: SlotLike[];
+  /** 수동 오버라이드(테스트 등) */
+  homeFreePill?: string;
   tag: string;
   hobbies: string[];
   bio: string;
@@ -41,6 +50,25 @@ export function peerCardHeadline(peer: Pick<FreeSlotPeer, "name" | "department">
 
 export function peerCardQuote(peer: Pick<FreeSlotPeer, "slotSummary" | "activity">): string {
   return peer.slotSummary?.trim() || peer.activity?.trim() || "";
+}
+
+/** 공강 매칭 카드 회색 영역 — 프로필 소개(bio), 없으면 한 줄 활동 문구 */
+export function peerCardIntro(peer: Pick<FreeSlotPeer, "bio" | "activity">): string {
+  const b = peer.bio?.trim();
+  if (b) return b;
+  return peer.activity?.trim() || "";
+}
+
+/** 홈 '공강이 겹치는 쿠옹이들' 오른쪽 pill — 오늘 구간 우선, API는 commonFreeSlots */
+export function peerHomeFreePillText(peer: FreeSlotPeer, now: Date = new Date()): string {
+  if (peer.commonFreeSlots?.length) {
+    return buildHomeFreePillFromCommonSlots(peer.commonFreeSlots, now);
+  }
+  if (peer.homeFreePill?.trim()) return peer.homeFreePill.trim();
+  const today = DAY_LABELS_KO[now.getDay()];
+  if (!peer.freeDays.includes(today)) return peer.tag;
+  if (peer.freeStart === "00:00" && peer.freeEnd === "23:59") return "지금 공강";
+  return formatFreeRangeKorean(peer.freeStart, peer.freeEnd);
 }
 
 const DEMO_ACCOUNT_IDS = new Set([

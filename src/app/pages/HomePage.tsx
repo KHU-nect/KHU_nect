@@ -20,6 +20,7 @@ import {
   isDemoAccountId,
   peerCardHeadline,
   peerCardQuote,
+  peerHomeFreePillText,
   type FreeSlotPeer,
 } from "../mocks/freeSlotPeers";
 import { resolveViewerHobbies } from "../utils/resolveViewerHobbies";
@@ -236,7 +237,9 @@ export function HomePage() {
                 시간표 기준으로 겹치는 공강이 있는 쿠옹이가 없어요. 잠시 후 다시 확인해 보세요!
               </p>
             ) : (
-              freeNowPeers.map((mate) => (
+              freeNowPeers.map((mate) => {
+                const freePill = peerHomeFreePillText(mate, now);
+                return (
                 <div
                   key={mate.id}
                   className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer border border-gray-100"
@@ -249,11 +252,16 @@ export function HomePage() {
                     </p>
                     <p className="text-xs text-gray-500 truncate">{mate.activity}</p>
                   </div>
-                  <div className="px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0" style={{ backgroundColor: "#FDF5E6", color: "#E6A620" }}>
-                    {mate.tag}
+                  <div
+                    className="px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0 max-w-[min(52vw,200px)] text-center truncate"
+                    style={{ backgroundColor: "#FFF5E6", color: "#F2994A" }}
+                    title={freePill}
+                  >
+                    {freePill}
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

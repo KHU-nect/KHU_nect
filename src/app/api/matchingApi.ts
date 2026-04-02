@@ -196,6 +196,7 @@ export function freePeriodUserToPeer(d: FreePeriodUserDto, index: number): FreeS
     activity: "",
     slotSummary: `겹치는 공강: ${formatSlotSummary(slots)}`,
     todayQuestion: todayQ || undefined,
+    commonFreeSlots: slots,
     tag: tagLabel ? `#${tagLabel}` : "#공강매칭",
     hobbies,
     bio: bioRaw,

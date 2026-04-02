@@ -11,6 +11,7 @@ import { getMyInterests, type MyInterest } from "../api/interestApi";
 import {
   getPeersForMatchingTab,
   peerCardHeadline,
+  peerCardIntro,
   peerCardQuote,
   type FreeSlotPeer,
 } from "../mocks/freeSlotPeers";
@@ -137,6 +138,11 @@ export function MatchingPage() {
   }, [isDemoUser, user?.id, backendPeers, dismissedIds, userHobbies, selectedFilter, now]);
 
   const currentCard = matchQueue[0];
+
+  const currentCardIntro = useMemo(
+    () => (currentCard ? peerCardIntro(currentCard) : ""),
+    [currentCard]
+  );
 
   useEffect(() => {
     setDismissedIds(new Set());
@@ -339,13 +345,13 @@ export function MatchingPage() {
               </button>
 
               <div className="bg-gray-50 rounded-xl p-5 space-y-3">
-                <p className="text-lg font-semibold text-gray-800 text-center">
-                  {peerCardQuote(currentCard) ? (
-                    <>
-                      &quot;{peerCardQuote(currentCard)}&quot;
-                    </>
+                <p className="text-base text-gray-800 text-center leading-relaxed whitespace-pre-wrap break-words">
+                  {currentCardIntro ? (
+                    <>{currentCardIntro}</>
                   ) : (
-                    <span className="text-gray-500 text-base font-medium">공강 시간이 겹쳐요</span>
+                    <span className="text-gray-500 font-medium">
+                      아직 등록된 소개글이 없어요
+                    </span>
                   )}
                 </p>
                 <div className="flex items-center justify-center gap-2 text-gray-600">
@@ -441,7 +447,7 @@ export function MatchingPage() {
                         {peerCardHeadline(card)}
                       </p>
                       <p className="text-xs text-gray-500 truncate">
-                        {peerCardQuote(card) || "공강 매칭"}
+                        {peerCardIntro(card) || peerCardQuote(card) || "공강 매칭"}
                       </p>
                     </div>
                     <MessageSquare
