@@ -35,8 +35,7 @@ export function ClassMatchingPage() {
   const [selectedUser, setSelectedUser] = useState<BackendClassMate | undefined>(undefined);
   const [backendMates, setBackendMates] = useState<BackendClassMate[]>([]);
   const [loadingMates, setLoadingMates] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<"all" | string>("all");
-  const [interestIdByName, setInterestIdByName] = useState<Record<string, number>>({});
+  const [selectedFilters, setSelectedFilters] = useState<Set<string>>(new Set());
   const [myInterests, setMyInterests] = useState<MyInterest[]>([]);
   const [interestsLoaded, setInterestsLoaded] = useState(false);
 
@@ -50,7 +49,6 @@ export function ClassMatchingPage() {
 
   useEffect(() => {
     if (!user?.id) {
-      setInterestIdByName({});
       setMyInterests([]);
       setInterestsLoaded(false);
       return;
@@ -60,23 +58,19 @@ export function ClassMatchingPage() {
     void getMyInterests()
       .then((list) => {
         if (cancelled) return;
-        const m: Record<string, number> = {};
         const cleaned: MyInterest[] = [];
         const seen = new Set<string>();
         for (const i of list) {
           const n = i?.name?.trim();
           if (!n || i.interestId == null || seen.has(n)) continue;
           seen.add(n);
-          m[n] = i.interestId;
           cleaned.push({ interestId: i.interestId, name: n });
         }
-        setInterestIdByName(m);
         setMyInterests(cleaned);
         setInterestsLoaded(true);
       })
       .catch(() => {
         if (!cancelled) {
-          setInterestIdByName({});
           setMyInterests([]);
           setInterestsLoaded(true);
         }
@@ -87,9 +81,23 @@ export function ClassMatchingPage() {
   }, [user?.id]);
 
   useEffect(() => {
-    if (selectedFilter === "all") return;
-    if (!myInterests.some((i) => i.name === selectedFilter)) setSelectedFilter("all");
-  }, [myInterests, selectedFilter]);
+    const allowed = new Set(myInterests.map((i) => i.name));
+    setSelectedFilters((prev) => {
+      const next = new Set([...prev].filter((f) => allowed.has(f)));
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [myInterests]);
+
+  const toggleFilter = useCallback((id: "all" | string) => {
+    setSelectedFilters((prev) => {
+      if (id === "all") return new Set<string>();
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,31 +106,18 @@ export function ClassMatchingPage() {
       setLoadingMates(false);
       return;
     }
-    if (selectedFilter !== "all" && !interestsLoaded) {
-      setLoadingMates(true);
-      return () => {
-        cancelled = true;
-      };
-    }
     const run = async () => {
       setLoadingMates(true);
       try {
-        let interestId: number | undefined;
-        if (selectedFilter !== "all") {
-          const id = interestIdByName[selectedFilter];
-          if (id != null && Number.isFinite(id)) interestId = id;
-        }
-        const rows = await getClassMatches(interestId);
+        const rows = await getClassMatches();
         if (cancelled) return;
         let list = rows
           .map((d, i) => classMatchUserDtoToBackendRow(d, courses, i))
           .filter((m): m is BackendClassMate => m != null)
           .filter((m) => m.userId !== user.id);
-        if (
-          selectedFilter !== "all" &&
-          (interestId === undefined || interestIdByName[selectedFilter] == null)
-        ) {
-          list = list.filter((m) => m.hobbies.includes(selectedFilter));
+        if (selectedFilters.size > 0) {
+          const filters = [...selectedFilters];
+          list = list.filter((m) => filters.every((f) => m.hobbies.includes(f)));
         }
         list.sort((a, b) => {
           if (b.sharedCount !== a.sharedCount) return b.sharedCount - a.sharedCount;
@@ -139,7 +134,7 @@ export function ClassMatchingPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, selectedFilter, interestIdByName, interestsLoaded, courses]);
+  }, [user?.id, selectedFilters, courses]);
 
   const accepterLabel = useMemo(() => {
     const dept = profile?.department?.trim();
@@ -254,12 +249,12 @@ export function ClassMatchingPage() {
         {user?.id && (
           <div className="flex gap-2 overflow-x-auto pb-2">
             {filterChips.map(({ id, label }) => {
-              const active = selectedFilter === id;
+              const active = id === "all" ? selectedFilters.size === 0 : selectedFilters.has(id);
               return (
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setSelectedFilter(id)}
+                  onClick={() => toggleFilter(id)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all flex-shrink-0 ${
                     active ? "shadow-sm" : "bg-white hover:shadow-sm"
                   }`}

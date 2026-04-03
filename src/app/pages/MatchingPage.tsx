@@ -22,7 +22,7 @@ export function MatchingPage() {
   const { openDmFromFreeSlotPeer } = useOpenDmFromFreeSlotPeer();
   const userHobbies = useMemo(() => resolveViewerHobbies(profile), [profile]);
 
-  const [selectedFilter, setSelectedFilter] = useState<"all" | string>("all");
+  const [selectedFilters, setSelectedFilters] = useState<Set<string>>(new Set());
   const [acceptedMatches, setAcceptedMatches] = useState<
     { card: FreeSlotPeer; roomId: string }[]
   >([]);
@@ -32,13 +32,11 @@ export function MatchingPage() {
   const [profilePeer, setProfilePeer] = useState<FreeSlotPeer | undefined>(undefined);
   const [backendPeers, setBackendPeers] = useState<FreeSlotPeer[]>([]);
   const [loadingPeers, setLoadingPeers] = useState(false);
-  const [interestIdByName, setInterestIdByName] = useState<Record<string, number>>({});
   const [myInterests, setMyInterests] = useState<MyInterest[]>([]);
   const [interestsLoaded, setInterestsLoaded] = useState(false);
 
   useEffect(() => {
     if (!user?.id) {
-      setInterestIdByName({});
       setMyInterests([]);
       setInterestsLoaded(false);
       return;
@@ -48,23 +46,19 @@ export function MatchingPage() {
     void getMyInterests()
       .then((list) => {
         if (cancelled) return;
-        const m: Record<string, number> = {};
         const cleaned: MyInterest[] = [];
         const seen = new Set<string>();
         for (const i of list) {
           const n = i?.name?.trim();
           if (!n || i.interestId == null || seen.has(n)) continue;
           seen.add(n);
-          m[n] = i.interestId;
           cleaned.push({ interestId: i.interestId, name: n });
         }
-        setInterestIdByName(m);
         setMyInterests(cleaned);
         setInterestsLoaded(true);
       })
       .catch(() => {
         if (!cancelled) {
-          setInterestIdByName({});
           setMyInterests([]);
           setInterestsLoaded(true);
         }
@@ -81,28 +75,15 @@ export function MatchingPage() {
       setLoadingPeers(false);
       return;
     }
-    if (selectedFilter !== "all" && !interestsLoaded) {
-      setLoadingPeers(true);
-      return () => {
-        cancelled = true;
-      };
-    }
     const run = async () => {
       setLoadingPeers(true);
       try {
-        let interestId: number | undefined;
-        if (selectedFilter !== "all") {
-          const id = interestIdByName[selectedFilter];
-          if (id != null && Number.isFinite(id)) interestId = id;
-        }
-        const rows = await getFreePeriodMatches(interestId);
+        const rows = await getFreePeriodMatches();
         if (cancelled) return;
         let peers = mapFreePeriodUsersToPeers(rows).filter((p) => p.userId !== user.id);
-        if (
-          selectedFilter !== "all" &&
-          (interestId === undefined || interestIdByName[selectedFilter] == null)
-        ) {
-          peers = peers.filter((p) => p.hobbies.includes(selectedFilter));
+        if (selectedFilters.size > 0) {
+          const filters = [...selectedFilters];
+          peers = peers.filter((p) => filters.every((f) => p.hobbies.includes(f)));
         }
         setBackendPeers(peers);
       } catch {
@@ -115,7 +96,7 @@ export function MatchingPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, selectedFilter, interestIdByName, interestsLoaded]);
+  }, [user?.id, selectedFilters]);
 
   const matchQueue = useMemo(() => {
     if (!user?.id) return [];
@@ -129,14 +110,33 @@ export function MatchingPage() {
     [currentCard]
   );
 
-  useEffect(() => {
-    setDismissedIds(new Set());
-  }, [selectedFilter, userHobbies, myInterests]);
+  const selectedFiltersKey = useMemo(
+    () => [...selectedFilters].sort().join("|"),
+    [selectedFilters]
+  );
 
   useEffect(() => {
-    if (selectedFilter === "all") return;
-    if (!myInterests.some((i) => i.name === selectedFilter)) setSelectedFilter("all");
-  }, [myInterests, selectedFilter]);
+    setDismissedIds(new Set());
+  }, [selectedFiltersKey, userHobbies, myInterests]);
+
+  useEffect(() => {
+    const allowed = new Set(myInterests.map((i) => i.name));
+    setSelectedFilters((prev) => {
+      const next = new Set([...prev].filter((f) => allowed.has(f)));
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [myInterests]);
+
+  const toggleFilter = useCallback((id: "all" | string) => {
+    setSelectedFilters((prev) => {
+      if (id === "all") return new Set<string>();
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const filterChips = useMemo(() => {
     const chips: { id: "all" | string; label: string }[] = [{ id: "all", label: "전체" }];
@@ -219,12 +219,12 @@ export function MatchingPage() {
 
         <div className="flex gap-2 mb-5 overflow-x-auto pb-2">
           {filterChips.map(({ id, label }) => {
-            const active = selectedFilter === id;
+            const active = id === "all" ? selectedFilters.size === 0 : selectedFilters.has(id);
             return (
               <button
                 key={id}
                 type="button"
-                onClick={() => setSelectedFilter(id)}
+                onClick={() => toggleFilter(id)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all flex-shrink-0 ${
                   active ? "shadow-sm" : "bg-white hover:shadow-sm"
                 }`}
