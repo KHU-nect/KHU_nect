@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Send } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "../context/AuthContext";
@@ -99,6 +99,7 @@ export function ChatPage() {
     inboxRevision,
   } = useDmChat();
   const [messageInput, setMessageInput] = useState("");
+  const dmScrollRef = useRef<HTMLDivElement>(null);
 
   const rooms = useMemo(
     () => (user?.id ? getRoomsForUser(user.id) : []),
@@ -114,6 +115,13 @@ export function ChatPage() {
     if (!openRoomId || !user?.id || !currentRoom) return;
     markDmRoomRead(user.id, openRoomId);
   }, [openRoomId, user?.id, currentRoom?.id, currentRoom?.messages.length, markDmRoomRead]);
+
+  useLayoutEffect(() => {
+    if (!openRoomId || !currentRoom) return;
+    const el = dmScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [openRoomId, currentRoom?.id, currentRoom?.messages.length]);
 
   const handleSendMessage = () => {
     if (!messageInput.trim() || !openRoomId || !user?.id) return;
@@ -206,7 +214,7 @@ export function ChatPage() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div ref={dmScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
           {currentRoom.messages.map((msg) => renderDmBubble(msg, user.id))}
         </div>
 

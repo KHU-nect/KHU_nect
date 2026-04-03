@@ -184,24 +184,17 @@ export function ClassMatchingPage() {
       e.stopPropagation();
       if (!user?.id) return;
 
-      const openChatSoon = (roomId: string) => {
-        window.setTimeout(() => {
-          navigate(`/home/chat?dm=${encodeURIComponent(roomId)}`);
-        }, 0);
-      };
-
       const numericUserId = /^\d+$/.test(mate.userId) ? Number(mate.userId) : NaN;
 
       const acceptWithLocal = () => {
         const sourceCourseId = firstSharedCourseId(courses, mate.sharedKeys);
-        const roomId = createRoomFromClassMatch({
+        createRoomFromClassMatch({
           posterUserId: mate.userId,
           accepterUserId: user.id,
           posterLabel: mate.name,
           accepterLabel,
           sourceCourseId,
         });
-        openChatSoon(roomId);
       };
 
       void (async () => {
@@ -212,7 +205,6 @@ export function ClassMatchingPage() {
             const roomId = String(accepted.directChatRoomId);
             await prefetchDirectChatRoom(roomId);
             recordMatchSuccessAlert(user.id, roomId, mate.name);
-            openChatSoon(roomId);
             return;
           }
           if (!isDemoUser && Number.isFinite(numericUserId)) {
@@ -220,7 +212,6 @@ export function ClassMatchingPage() {
             await refreshServerRooms();
             await prefetchDirectChatRoom(directChatRoomId);
             recordMatchSuccessAlert(user.id, directChatRoomId, mate.name);
-            openChatSoon(directChatRoomId);
             return;
           }
           acceptWithLocal();
@@ -242,7 +233,6 @@ export function ClassMatchingPage() {
       refreshServerRooms,
       prefetchDirectChatRoom,
       recordMatchSuccessAlert,
-      navigate,
     ]
   );
 

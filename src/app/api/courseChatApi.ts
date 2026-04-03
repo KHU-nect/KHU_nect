@@ -20,6 +20,8 @@ export type CourseChatMessageDto = {
   senderNickname: string;
   content: string;
   createdAt: string;
+  /** 같이 앉기 등 노출 만료 시각(ISO). 없으면 프론트에서 createdAt+5분으로 표시 */
+  expiresAt?: string | null;
   mode?: CourseChatMessageMode | string | null;
   sitTogetherStatus?: SitTogetherStatusDto | string | null;
   sitTogetherDirectRoomId?: string | number | null;
@@ -120,6 +122,15 @@ export function normalizeCourseChatMessageRow(row: unknown, index: number): Cour
 
   const content = pickStr(o, "content", "body", "text", "message");
   const createdAt = pickStr(o, "createdAt", "created_at", "sentAt", "sent_at", "timestamp");
+  const expiresAtRaw = pickStr(
+    o,
+    "expiresAt",
+    "expires_at",
+    "sitExpiresAt",
+    "sit_expires_at",
+    "expireAt",
+    "expire_at"
+  );
   const roomId = o.roomId ?? o.room_id ?? 0;
 
   return {
@@ -129,6 +140,7 @@ export function normalizeCourseChatMessageRow(row: unknown, index: number): Cour
     senderNickname: nickname || "쿠옹이",
     content,
     createdAt: createdAt || new Date().toISOString(),
+    ...(expiresAtRaw ? { expiresAt: expiresAtRaw } : {}),
     mode: (o.mode ?? o.messageMode) as CourseChatMessageMode | string | null | undefined,
     sitTogetherStatus: (o.sitTogetherStatus ?? o.sit_together_status) as
       | SitTogetherStatusDto
@@ -181,11 +193,25 @@ export async function postCourseChatMessage(
   payload: { content: string; mode?: CourseChatMessageMode }
 ) {
   const mode = payload.mode ?? "GENERAL";
-  return apiRequest<unknown>(`/api/course-chat/rooms/${encodeURIComponent(roomId)}/messages`, {
+  const path = `/api/course-chat/rooms/${encodeURIComponent(roomId)}/messages`;
+  const body = { content: payload.content, mode };
+  if (import.meta.env.DEV) {
+    console.log("[course-chat][REST] 요청 → 서버 저장 시도", {
+      method: "POST",
+      path,
+      body,
+      설명: "성공 시 ApiResponse.data; 화면은 이어서 GET …/messages 로 목록 갱신",
+    });
+  }
+  const data = await apiRequest<unknown>(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: payload.content, mode }),
+    body: JSON.stringify(body),
   });
+  if (import.meta.env.DEV) {
+    console.log("[course-chat][REST] 응답 수신(저장 처리는 서버)", { path, data });
+  }
+  return data;
 }
 
 export async function acceptSitTogetherMessage(roomId: string, messageId: string) {

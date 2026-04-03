@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { HandshakeIcon, HelpCircle, Send } from "lucide-react";
 import { useNavigate } from "react-router";
 import { ApiError } from "../api/client";
+import { MatchSuccessModal } from "./MatchSuccessModal";
 import { useAuth } from "../context/AuthContext";
 import { useClassChat } from "../context/ClassChatContext";
 import { useDmChat } from "../context/DmChatContext";
 import { useProfile } from "../context/ProfileContext";
 import type { ClassChatMessage, InputMode } from "../types/classChat";
+import { parseBackendInstantMs } from "../utils/parseBackendInstant";
+import { getSitTogetherEndMs } from "../utils/sitTogetherExpiry";
 import { sameAppUserId } from "../utils/userIdMatch";
 
 type QuickMode = "none" | "question" | "sitTogether";
@@ -18,8 +21,9 @@ function toInputMode(quick: QuickMode): InputMode {
 }
 
 function formatMessageTime(iso: string) {
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return "—";
+  const ms = parseBackendInstantMs(iso);
+  if (ms == null) return "—";
+  const d = new Date(ms);
   const now = new Date();
   const sameDay =
     d.getFullYear() === now.getFullYear() &&
@@ -34,10 +38,26 @@ function formatMessageTime(iso: string) {
   return `${d.getMonth() + 1}/${d.getDate()} ${clock}`;
 }
 
+/** 같이 앉기 PENDING: 남은 시간 `M:SS 남음`(1초 단위). 만료 시 빈 문자열(목록에서 제거됨) */
+function formatSitTogetherRemaining(msg: ClassChatMessage): string {
+  const endMs = getSitTogetherEndMs(msg);
+  if (endMs == null) return "";
+  const remainingMs = endMs - Date.now();
+  if (remainingMs <= 0) return "";
+  const totalSec = Math.floor(remainingMs / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")} 남음`;
+}
+
 type Props = {
   courseId: string;
   serverCourseId?: number;
 };
+
+function normalizeMessageId(id: unknown): string {
+  return String(id ?? "");
+}
 
 function isMessageMine(msg: ClassChatMessage, currentUserId: string | undefined) {
   if (currentUserId && msg.senderUserId != null && String(msg.senderUserId).trim() !== "") {
@@ -51,6 +71,7 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
   const { user } = useAuth();
   const {
     bindCourseRoom,
+    getMessages,
     getVisibleMessages,
     sendMessage,
     deleteMessage,
@@ -63,6 +84,13 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
   const [quickMode, setQuickMode] = useState<QuickMode>("none");
   const [, setTick] = useState(0);
   const [sitAcceptingId, setSitAcceptingId] = useState<string | null>(null);
+  const [sitMatchModal, setSitMatchModal] = useState<{
+    directRoomId: string;
+    peerLabel: string;
+  } | null>(null);
+  const sitTogetherStatusByIdRef = useRef<Map<string, string>>(new Map());
+  const sitMatchModalShownIdRef = useRef<Set<string>>(new Set());
+  const classChatScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const id = window.setInterval(() => setTick((t) => t + 1), 1000);
@@ -80,6 +108,34 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
 
   const messages = getVisibleMessages(courseId);
   const loadError = getCourseChatLoadError(courseId);
+
+  useLayoutEffect(() => {
+    const el = classChatScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [courseId, messages.length]);
+
+  /** 요청자: 전체 목록 기준 PENDING → ACCEPTED 전환 시 모달(ACCEPTED 행은 화면에서 숨김) */
+  useEffect(() => {
+    if (!user?.id) return;
+    const all = getMessages(courseId);
+    for (const m of all) {
+      if (m.kind !== "sitTogether") continue;
+      const id = normalizeMessageId(m.id);
+      const prev = sitTogetherStatusByIdRef.current.get(id);
+      sitTogetherStatusByIdRef.current.set(id, m.sitTogetherStatus ?? "");
+      if (m.sitTogetherStatus !== "ACCEPTED" || !m.sitTogetherDirectRoomId) continue;
+      if (!isMessageMine(m, user.id)) continue;
+      if (sitMatchModalShownIdRef.current.has(id)) continue;
+      if (prev !== "PENDING" && prev !== "NOT_APPLICABLE") continue;
+      sitMatchModalShownIdRef.current.add(id);
+      setSitMatchModal({
+        directRoomId: String(m.sitTogetherDirectRoomId),
+        peerLabel: "수락한 쿠옹이",
+      });
+      break;
+    }
+  }, [messages, courseId, user?.id, getMessages]);
 
   const handleSend = () => {
     if (!messageInput.trim() || !user?.id) return;
@@ -100,7 +156,7 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
 
     const isDemo = user.id.startsWith("demo-user-");
     if (isDemo) {
-      createRoomFromSitMatch({
+      const dmRoomId = createRoomFromSitMatch({
         courseId,
         posterUserId: msg.senderUserId,
         accepterUserId: user.id,
@@ -108,13 +164,22 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
         accepterLabel: senderLabel,
       });
       deleteMessage(courseId, msg.id);
+      sitMatchModalShownIdRef.current.add(normalizeMessageId(msg.id));
+      setSitMatchModal({
+        directRoomId: dmRoomId,
+        peerLabel: msg.senderLabel || "쿠옹이",
+      });
       return;
     }
 
     setSitAcceptingId(msg.id);
     try {
       const { directRoomId } = await acceptSitTogetherRequest(courseId, msg.id);
-      openDirectRoom(directRoomId);
+      sitMatchModalShownIdRef.current.add(normalizeMessageId(msg.id));
+      setSitMatchModal({
+        directRoomId: String(directRoomId),
+        peerLabel: msg.senderLabel || "쿠옹이",
+      });
     } catch (e) {
       const msgText =
         e instanceof ApiError
@@ -134,19 +199,12 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
     openDirectRoom(rid);
   };
 
-  const sitRemainingSec = (msg: ClassChatMessage): number | null => {
-    if (msg.kind !== "sitTogether" || msg.sitTogetherStatus === "ACCEPTED") return null;
-    if (!msg.expiresAt) return null;
-    const ms = new Date(msg.expiresAt).getTime() - Date.now();
-    return Math.max(0, Math.ceil(ms / 1000));
-  };
-
   const renderBubble = (msg: ClassChatMessage) => {
     const isQuestion = msg.kind === "question";
     const isSit = msg.kind === "sitTogether";
     const mine = isMessageMine(msg, user?.id);
-    const remain = isSit ? sitRemainingSec(msg) : null;
-    const sitPendingExpired = isSit && remain !== null && remain <= 0;
+    const sitRemainLine =
+      isSit && msg.sitTogetherStatus === "PENDING" ? formatSitTogetherRemaining(msg) : "";
 
     return (
       <div
@@ -177,18 +235,20 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
             </div>
             <span className="text-xs text-gray-500 mt-1 tabular-nums">
               {formatMessageTime(msg.createdAt)}
-              {isSit && remain !== null && (
-                <span className="text-[#A71930] font-medium ml-1.5">
-                  · {remain > 0 ? `${Math.floor(remain / 60)}:${String(remain % 60).padStart(2, "0")} 남음` : "만료 임박"}
-                </span>
-              )}
             </span>
+            {sitRemainLine ? (
+              <span
+                className="text-[11px] mt-0.5 tabular-nums block leading-snug font-medium"
+                style={{ color: "#A71930" }}
+              >
+                {sitRemainLine}
+              </span>
+            ) : null}
             {isSit &&
               msg.sitTogetherStatus === "PENDING" &&
               !mine &&
               user?.id &&
-              !user.id.startsWith("demo-user-") &&
-              !sitPendingExpired && (
+              !user.id.startsWith("demo-user-") && (
                 <button
                   type="button"
                   disabled={sitAcceptingId === msg.id}
@@ -202,9 +262,7 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
             {isSit &&
               msg.sitTogetherStatus === "PENDING" &&
               mine &&
-              user?.id?.startsWith("demo-user-") &&
-              remain !== null &&
-              remain > 0 && (
+              user?.id?.startsWith("demo-user-") && (
                 <p className="mt-2 text-xs text-gray-500 max-w-[220px]">
                   데모 모드: 상대가 수락하면 로컬 1:1 방이 열립니다.
                 </p>
@@ -212,8 +270,7 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
             {isSit &&
               user?.id?.startsWith("demo-user-") &&
               !mine &&
-              remain !== null &&
-              remain > 0 && (
+              msg.sitTogetherStatus === "PENDING" && (
                 <button
                   type="button"
                   onClick={() => void handleAcceptSit(msg)}
@@ -239,8 +296,21 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
     );
   };
 
+  const closeSitMatchModal = () => setSitMatchModal(null);
+  const goToSitMatchChat = () => {
+    if (!sitMatchModal) return;
+    openDirectRoom(sitMatchModal.directRoomId);
+    setSitMatchModal(null);
+  };
+
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-gray-50">
+      <MatchSuccessModal
+        open={sitMatchModal != null}
+        peerLabel={sitMatchModal?.peerLabel ?? ""}
+        onClose={closeSitMatchModal}
+        onGoToChat={goToSitMatchChat}
+      />
       {loadError && (
         <div
           className="mx-4 mt-3 px-3 py-2 rounded-xl text-xs text-red-800 bg-red-50 border border-red-200"
@@ -249,7 +319,7 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
           {loadError} (이 상태에서는 남이 쓴 글이 서버에서 내려오지 않을 수 있습니다.)
         </div>
       )}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={classChatScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
           <p className="text-center text-sm text-gray-500 py-8">첫 메시지를 남겨보세요.</p>
         ) : (

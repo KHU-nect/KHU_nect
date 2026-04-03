@@ -21,12 +21,12 @@ import {
   postCourseChatMessage,
 } from "../api/courseChatApi";
 import { buildStompBrokerUrls } from "../utils/stompBrokerUrls";
+import { parseBackendInstantMs } from "../utils/parseBackendInstant";
+import { isSitTogetherPendingExpired } from "../utils/sitTogetherExpiry";
 import { sameAppUserId } from "../utils/userIdMatch";
 
 const STORAGE_KEY = "khu-nect_class_chat";
 const ACCESS_TOKEN_KEY = "khu-nect_access_token";
-
-const SIT_TOGETHER_TTL_MS = 5 * 60 * 1000;
 
 type MessagesState = Record<string, ClassChatMessage[]>;
 const QUESTION_PREFIX = "[Q]";
@@ -45,6 +45,12 @@ function courseChatStompSendDestination(roomId: string): string {
 }
 
 const STOMP_JSON_HEADERS = { "content-type": "application/json" };
+
+function devCourseChat(label: string, payload: Record<string, unknown>) {
+  if (import.meta.env.DEV) {
+    console.log(`[course-chat] ${label}`, payload);
+  }
+}
 
 const COURSE_CHAT_HTTP_SEND =
   String(import.meta.env.VITE_COURSE_CHAT_HTTP_SEND ?? "").toLowerCase() === "true";
@@ -66,39 +72,25 @@ function stompReconnectDelayMs(): number {
 }
 
 function parseTimeMs(iso: string | undefined): number | null {
-  if (iso == null || iso === "") return null;
-  const t = new Date(iso).getTime();
-  return Number.isFinite(t) ? t : null;
+  return parseBackendInstantMs(iso ?? null);
 }
 
-function sitExpiresAtMs(m: ClassChatMessage): number {
-  if (m.kind !== "sitTogether") return Number.POSITIVE_INFINITY;
-  if (m.sitTogetherStatus === "ACCEPTED") return Number.POSITIVE_INFINITY;
-  const fromCreated = parseTimeMs(m.createdAt) ?? Date.now();
-  const fallbackEnd = fromCreated + SIT_TOGETHER_TTL_MS;
-  if (m.expiresAt != null && String(m.expiresAt).trim() !== "") {
-    const exp = parseTimeMs(String(m.expiresAt));
-    /** 미래 만료만 신뢰. 과거/0이면 서버·병합 오류로 보고 작성 시각+TTL 사용(바로 사라짐 방지) */
-    if (exp != null && Number.isFinite(exp) && exp > fromCreated && exp > Date.now()) {
-      return exp;
-    }
-  }
-  return fallbackEnd;
-}
-
-export function isSitTogetherVisible(m: ClassChatMessage, now = Date.now()): boolean {
-  if (m.kind !== "sitTogether") return true;
-  if (m.sitTogetherStatus === "ACCEPTED") return true;
-  /** 모드는 같이 앉기인데 상태만 NOT_APPLICABLE인 응답은 PENDING처럼 취급 */
-  if (m.sitTogetherStatus === "NOT_APPLICABLE") return now <= sitExpiresAtMs({ ...m, sitTogetherStatus: "PENDING" });
-  return now <= sitExpiresAtMs(m);
+/**
+ * 수업 채팅·미리보기에 같이 앉기 말풍선을 보일지.
+ * 매칭 완료(ACCEPTED)는 1:1 채팅으로 이관된 것으로 보고 목록에서 숨김(서버 히스토리에는 남을 수 있음).
+ * PENDING은 노출 기간(5분·서버 expiresAt)이 지나면 숨김.
+ */
+export function isSitTogetherVisible(m: ClassChatMessage, nowMs = Date.now()): boolean {
+  if (m.kind === "sitTogether" && m.sitTogetherStatus === "ACCEPTED") return false;
+  if (isSitTogetherPendingExpired(m, nowMs)) return false;
+  return true;
 }
 
 type ClassChatContextValue = {
   messagesByCourseId: MessagesState;
   bindCourseRoom: (courseId: string, serverCourseId?: number) => Promise<void>;
   getMessages: (courseId: string) => ClassChatMessage[];
-  /** 만료된 같이 앉기 제외 (목록·미리보기용) */
+  /** 목록·미리보기용(PENDING 등만; ACCEPTED 같이 앉기는 숨김) */
   getVisibleMessages: (courseId: string) => ClassChatMessage[];
   sendMessage: (
     courseId: string,
@@ -126,7 +118,7 @@ function kindFromMode(mode: InputMode): ClassChatMessage["kind"] {
 function decodeIncomingContent(
   raw: string,
   createdAt: string
-): Pick<ClassChatMessage, "kind" | "content" | "expiresAt" | "sitRequestId"> {
+): Pick<ClassChatMessage, "kind" | "content" | "sitRequestId"> {
   const s = typeof raw === "string" ? raw.trimStart() : String(raw);
   if (s.startsWith(QUESTION_PREFIX)) {
     return { kind: "question", content: s.slice(QUESTION_PREFIX.length).trim() };
@@ -136,7 +128,6 @@ function decodeIncomingContent(
     return {
       kind: "sitTogether",
       content: s.slice(SIT_PREFIX.length).trim(),
-      expiresAt: new Date(baseMs + SIT_TOGETHER_TTL_MS).toISOString(),
       sitRequestId: `sit-${createdAt || baseMs}`,
     };
   }
@@ -167,16 +158,14 @@ function courseChatDtoToClassMessage(
       : new Date().toISOString();
 
   const apiMode = String(m.mode ?? "").toUpperCase();
-  let decoded: Pick<ClassChatMessage, "kind" | "content" | "expiresAt" | "sitRequestId">;
+  let decoded: Pick<ClassChatMessage, "kind" | "content" | "sitRequestId">;
 
   if (apiMode === "QUESTION") {
     decoded = { kind: "question", content: rawContent.trim() };
   } else if (apiMode === "SIT_TOGETHER") {
-    const baseMs = parseTimeMs(createdAt) ?? Date.now();
     decoded = {
       kind: "sitTogether",
       content: rawContent.trim(),
-      expiresAt: new Date(baseMs + SIT_TOGETHER_TTL_MS).toISOString(),
       sitRequestId: `sit-${String(m.messageId)}`,
     };
   } else {
@@ -210,12 +199,13 @@ function courseChatDtoToClassMessage(
     sitTogetherDirectRoomId = directId;
   }
 
-  if (decoded.kind === "sitTogether" && sitTogetherStatus === "NOT_APPLICABLE") {
-    sitTogetherStatus = "PENDING";
-  }
-
   const sid = String(m.senderUserId);
   const isMe = sameAppUserId(userId, m.senderUserId);
+  const expiresAtRaw = m.expiresAt;
+  const expiresAt =
+    expiresAtRaw != null && String(expiresAtRaw).trim() !== ""
+      ? String(expiresAtRaw)
+      : undefined;
 
   return {
     id: String(m.messageId),
@@ -226,9 +216,9 @@ function courseChatDtoToClassMessage(
     senderLabel: m.senderNickname || "쿠옹이",
     senderUserId: sid === "-1" ? undefined : sid,
     sitRequestId: decoded.sitRequestId,
-    expiresAt: sitTogetherStatus === "ACCEPTED" ? undefined : decoded.expiresAt,
     sitTogetherStatus,
     sitTogetherDirectRoomId,
+    ...(expiresAt ? { expiresAt } : {}),
     isMe,
   };
 }
@@ -239,6 +229,7 @@ type IncomingCourseChatMessage = {
   senderNickname?: string;
   content?: string;
   createdAt?: string;
+  expiresAt?: string;
   mode?: string;
   sitTogetherStatus?: string;
   sitTogetherDirectRoomId?: string | number;
@@ -284,15 +275,19 @@ function buildOptimisticClassMessage(
     senderUserId,
     isMe: true,
   };
-  return kind === "sitTogether"
-    ? {
-        ...base,
-        sitRequestId: `sit-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        expiresAt: new Date(Date.now() + SIT_TOGETHER_TTL_MS).toISOString(),
-        sitTogetherStatus: "PENDING",
-        sitTogetherDirectRoomId: null,
-      }
-    : base;
+  if (kind !== "sitTogether") return base;
+  const createdMs = parseBackendInstantMs(createdAt) ?? Date.now();
+  const expiresAt =
+    Number.isFinite(createdMs) && createdMs > 0
+      ? new Date(createdMs + 5 * 60 * 1000).toISOString()
+      : new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  return {
+    ...base,
+    sitRequestId: `sit-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    sitTogetherStatus: "PENDING",
+    sitTogetherDirectRoomId: null,
+    expiresAt,
+  };
 }
 
 function messagesLikelyDuplicate(a: ClassChatMessage, b: ClassChatMessage): boolean {
@@ -363,18 +358,13 @@ function alignSitTogetherFromPrev(
       sameAppUserId(prevM.senderUserId, s.senderUserId) &&
       String(prevM.content ?? "").trim() === String(s.content ?? "").trim()
     ) {
-      const baseMs = parseTimeMs(s.createdAt) ?? Date.now();
-      const exp =
-        prevM.expiresAt && parseTimeMs(prevM.expiresAt) != null
-          ? prevM.expiresAt
-          : new Date(baseMs + SIT_TOGETHER_TTL_MS).toISOString();
       return {
         ...s,
         kind: "sitTogether",
-        expiresAt: exp,
         sitRequestId: prevM.sitRequestId ?? `sit-${normalizeMessageId(s.id)}`,
         sitTogetherStatus: prevM.sitTogetherStatus ?? "PENDING",
         sitTogetherDirectRoomId: prevM.sitTogetherDirectRoomId ?? null,
+        expiresAt: prevM.expiresAt ?? s.expiresAt,
       };
     }
     return s;
@@ -408,18 +398,14 @@ function mergeServerAndPendingLocals(
     }
     const s = merged[dupIdx];
     if (p.kind === "sitTogether" && s.kind === "text") {
-      const baseMs = parseTimeMs(s.createdAt) ?? Date.now();
       merged[dupIdx] = {
         ...s,
         kind: "sitTogether",
         content: String(p.content ?? "").trim(),
-        expiresAt:
-          p.expiresAt && parseTimeMs(p.expiresAt) != null
-            ? p.expiresAt
-            : new Date(baseMs + SIT_TOGETHER_TTL_MS).toISOString(),
         sitRequestId: p.sitRequestId ?? `sit-${normalizeMessageId(s.id)}`,
         sitTogetherStatus: p.sitTogetherStatus ?? "PENDING",
         sitTogetherDirectRoomId: p.sitTogetherDirectRoomId ?? null,
+        expiresAt: p.expiresAt ?? s.expiresAt,
       };
     }
   }
@@ -456,13 +442,10 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
                 senderUserId: m.isMe ? "mock-user-1" : undefined,
               };
             }
-            if (next.kind === "sitTogether" && !next.expiresAt) {
-              const base = parseTimeMs(next.createdAt) ?? Date.now();
+            if (next.kind === "sitTogether" && next.sitRequestId == null) {
               next = {
                 ...next,
-                expiresAt: new Date(base + SIT_TOGETHER_TTL_MS).toISOString(),
-                sitRequestId:
-                  next.sitRequestId ?? `sit-legacy-${next.id}`,
+                sitRequestId: `sit-legacy-${next.id}`,
               };
             }
             if (next.kind === "sitTogether" && next.sitTogetherStatus == null) {
@@ -608,40 +591,18 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
     };
   }, [user?.id, timetableChatKey, loadCourseMessages]);
 
-  /** 주기적으로 만료된 같이 앉기 메시지 제거 */
-  useEffect(() => {
-    const tick = () => {
-      const now = Date.now();
-      setMessagesByCourseId((prev) => {
-        let changed = false;
-        const next: MessagesState = {};
-        for (const [cid, list] of Object.entries(prev)) {
-          const filtered = list.filter((m) => {
-            if (m.kind !== "sitTogether") return true;
-            if (now <= sitExpiresAtMs(m)) return true;
-            changed = true;
-            return false;
-          });
-          next[cid] = filtered;
-        }
-        return changed ? next : prev;
-      });
-    };
-    tick();
-    const id = window.setInterval(tick, 15_000);
-    return () => window.clearInterval(id);
-  }, []);
-
   const getMessages = useCallback(
     (courseId: string) => dedupeOptimisticDuplicates(messagesByCourseId[courseId] ?? []),
     [messagesByCourseId]
   );
 
   const getVisibleMessages = useCallback(
-    (courseId: string) =>
-      dedupeOptimisticDuplicates(messagesByCourseId[courseId] ?? []).filter((m) =>
-        isSitTogetherVisible(m)
-      ),
+    (courseId: string) => {
+      const now = Date.now();
+      return dedupeOptimisticDuplicates(messagesByCourseId[courseId] ?? []).filter((m) =>
+        isSitTogetherVisible(m, now)
+      );
+    },
     [messagesByCourseId]
   );
 
@@ -670,6 +631,18 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
       const apiMode = inputModeToApiMode(mode);
       const publishBody = JSON.stringify({ content: trimmed, mode: apiMode });
       const httpPayload = { content: trimmed, mode: apiMode };
+      const bodyForLog = { content: trimmed, mode: apiMode };
+
+      devCourseChat("전송 시작(클라)", {
+        courseId,
+        inputMode: mode,
+        apiMode,
+        mappedRoomId: courseRoomMap[courseId] ?? null,
+        serverCourseId: serverCourseId ?? null,
+        COURSE_CHAT_HTTP_SEND,
+        CLASS_CHAT_WS_ENABLED,
+        설명: "서버 반영 여부는 STOMP 수신·GET 목록으로 확인",
+      });
 
       /**
        * 예전 동작 복원: 기본은 STOMP → 미연결이면 전송 대기 큐.
@@ -679,6 +652,12 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
         const dest = courseChatStompSendDestination(roomId);
 
         if (COURSE_CHAT_HTTP_SEND) {
+          devCourseChat("경로: REST POST", {
+            roomId,
+            courseId: reloadCourseId,
+            path: `/api/course-chat/rooms/${roomId}/messages`,
+            body: bodyForLog,
+          });
           void (async () => {
             try {
               await postCourseChatMessage(roomId, httpPayload);
@@ -694,17 +673,34 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
 
         const client = stompRef.current;
         if (client?.connected) {
+          devCourseChat("경로: STOMP publish (연결됨)", {
+            roomId,
+            courseId: reloadCourseId,
+            brokerURL: client.webSocket?.url ?? null,
+            destination: dest,
+            body: bodyForLog,
+            설명: "브로커가 서버 앱 목적지로 넘기면 서버가 저장; /sub 구독 또는 GET으로 확인",
+          });
           client.publish({ destination: dest, body: publishBody, headers: STOMP_JSON_HEADERS });
           window.setTimeout(() => void loadCourseMessages(reloadCourseId, roomId), 500);
           window.setTimeout(() => void loadCourseMessages(reloadCourseId, roomId), 1800);
           return;
         }
 
-        pendingCourseChatPublishesRef.current.push({
+        const q = pendingCourseChatPublishesRef.current;
+        q.push({
           destination: dest,
           body: publishBody,
           courseId: reloadCourseId,
           roomId,
+        });
+        devCourseChat("경로: STOMP 대기열 (WS 미연결)", {
+          roomId,
+          courseId: reloadCourseId,
+          destination: dest,
+          body: bodyForLog,
+          대기개수: q.length,
+          설명: "WebSocket 연결되면 같은 destination으로 publish 후 서버 저장",
         });
       };
 
@@ -748,9 +744,11 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
             try {
               const entered = await enterCourseChatRoom(serverCourseId, true);
               const roomId = String(entered.roomId);
+              devCourseChat("rooms/enter 완료", { courseId, serverCourseId, roomId });
               setCourseRoomMap((prev) => ({ ...prev, [courseId]: roomId }));
               tryPublishOrQueue(roomId, false);
             } catch {
+              devCourseChat("rooms/enter 실패(전송 안 함)", { courseId, serverCourseId });
               /* 낙관적 메시지(early)만 유지 */
             }
           })();
@@ -763,6 +761,10 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
             buildOptimisticClassMessage(courseId, mode, trimmed, senderLabel, senderUserId),
           ],
         }));
+        devCourseChat("전송 스킵", {
+          courseId,
+          이유: "roomId 없음 + sendMessage에 serverCourseId 없음 → 로컬 낙관적만",
+        });
         return;
       }
 
@@ -893,6 +895,7 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
                         senderNickname: parsed.senderNickname ?? "쿠옹이",
                         content: String(parsed.content ?? ""),
                         createdAt: createdAtWs,
+                        expiresAt: parsed.expiresAt,
                         mode: parsed.mode,
                         sitTogetherStatus: parsed.sitTogetherStatus,
                         sitTogetherDirectRoomId: parsed.sitTogetherDirectRoomId,
@@ -901,10 +904,15 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
                       user.id
                     );
                     const idx = list.findIndex((m) => normalizeMessageId(m.id) === id);
+                    const prevRow = idx === -1 ? undefined : list[idx];
+                    const incomingMerged =
+                      prevRow && !incoming.expiresAt && prevRow.expiresAt
+                        ? { ...incoming, expiresAt: prevRow.expiresAt }
+                        : incoming;
                     const mergedList =
                       idx === -1
-                        ? [...list, incoming]
-                        : list.map((m, i) => (i === idx ? incoming : m));
+                        ? [...list, incomingMerged]
+                        : list.map((m, i) => (i === idx ? incomingMerged : m));
                     const next = mergedList.sort((a, b) =>
                       String(a.createdAt).localeCompare(String(b.createdAt))
                     );
@@ -919,6 +927,16 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
           const pubClient = stompRef.current;
           if (pubClient?.connected) {
             const batch = pendingCourseChatPublishesRef.current.splice(0);
+            if (import.meta.env.DEV && batch.length > 0) {
+              console.log("[course-chat] STOMP 대기열 flush", {
+                count: batch.length,
+                items: batch.map((p) => ({
+                  courseId: p.courseId,
+                  roomId: p.roomId,
+                  destination: p.destination,
+                })),
+              });
+            }
             for (const p of batch) {
               pubClient.publish({
                 destination: p.destination,

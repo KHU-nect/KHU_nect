@@ -1,5 +1,4 @@
 import { useCallback, useMemo } from "react";
-import { useNavigate } from "react-router";
 import { useAuth } from "../context/AuthContext";
 import { useProfile } from "../context/ProfileContext";
 import { useDmChat } from "../context/DmChatContext";
@@ -17,11 +16,10 @@ function isNumericServerUserId(userId: string | undefined): userId is string {
 
 /**
  * 공강 매칭·홈 공강 목록 등에서 동일 플로우:
- * 서버 수락(매칭 글 / numeric userId) 또는 로컬 데모 방 → 1:1 채팅으로 이동.
+ * 서버 수락(매칭 글 / numeric userId) 또는 로컬 데모 방 생성 → Layout 매칭 성공 모달만 띄움(채팅 탭 자동 이동 없음).
  * @returns 열린 방 ID, 실패·미로그인 시 null
  */
 export function useOpenDmFromFreeSlotPeer() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { profile } = useProfile();
   const {
@@ -41,22 +39,14 @@ export function useOpenDmFromFreeSlotPeer() {
     async (peer: FreeSlotPeer): Promise<string | null> => {
       if (!user?.id) return null;
 
-      const openChatSoon = (roomId: string) => {
-        window.setTimeout(() => {
-          navigate(`/home/chat?dm=${encodeURIComponent(roomId)}`);
-        }, 0);
-      };
-
       const acceptWithLocal = (): string => {
         const posterUserId = peerPosterUserId(peer);
-        const roomId = createRoomFromFreeSlotMatch({
+        return createRoomFromFreeSlotMatch({
           posterUserId,
           accepterUserId: user.id,
           posterLabel: peer.name,
           accepterLabel,
         });
-        openChatSoon(roomId);
-        return roomId;
       };
 
       try {
@@ -66,7 +56,6 @@ export function useOpenDmFromFreeSlotPeer() {
           const roomId = String(accepted.directChatRoomId);
           await prefetchDirectChatRoom(roomId);
           recordMatchSuccessAlert(user.id, roomId, peer.name);
-          openChatSoon(roomId);
           return roomId;
         }
         if (!isDemoUser && isNumericServerUserId(peer.userId)) {
@@ -74,7 +63,6 @@ export function useOpenDmFromFreeSlotPeer() {
           await refreshServerRooms();
           await prefetchDirectChatRoom(directChatRoomId);
           recordMatchSuccessAlert(user.id, directChatRoomId, peer.name);
-          openChatSoon(directChatRoomId);
           return directChatRoomId;
         }
         return acceptWithLocal();
@@ -89,7 +77,6 @@ export function useOpenDmFromFreeSlotPeer() {
     [
       user?.id,
       isDemoUser,
-      navigate,
       refreshServerRooms,
       prefetchDirectChatRoom,
       recordMatchSuccessAlert,
