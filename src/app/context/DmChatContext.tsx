@@ -27,7 +27,60 @@ import {
   setMatchAlertForUser as persistMatchAlertForUser,
   setMatchAlertsForBothUsers,
 } from "../utils/matchAlertStorage";
+import { parseDirectChatStompBody } from "../utils/parseDirectChatStomp";
 import { buildStompBrokerUrls } from "../utils/stompBrokerUrls";
+import { stompReconnectDelayMs } from "../utils/stompReconnectDelayMs";
+
+const STOMP_JSON_HEADERS = { "content-type": "application/json" };
+
+/**
+ * 수업 채팅과 동일하게 기본은 `/pub/.../messages`.
+ * 백엔드가 `/app/...`만 열어둔 경우 `.env`에 `VITE_DIRECT_CHAT_STOMP_SEND_BASE=/app/direct-chat/rooms`
+ */
+function directChatStompSendDestination(roomId: string): string {
+  const base = (import.meta.env.VITE_DIRECT_CHAT_STOMP_SEND_BASE as string | undefined)?.trim();
+  if (base) return `${base.replace(/\/$/, "")}/${roomId}/messages`;
+  return `/pub/direct-chat/rooms/${roomId}/messages`;
+}
+
+const DIRECT_CHAT_HTTP_SEND =
+  String(import.meta.env.VITE_DIRECT_CHAT_HTTP_SEND ?? "").toLowerCase() === "true";
+
+/** `false`면 DM STOMP 비활성(수업 채팅 `VITE_CLASS_CHAT_WS`와 대칭) — GET 폴링만 */
+const DIRECT_CHAT_WS_ENABLED =
+  String(import.meta.env.VITE_DIRECT_CHAT_WS ?? "true").toLowerCase() !== "false";
+
+type PendingDirectPublish = {
+  destination: string;
+  body: string;
+  roomId: string;
+};
+
+function devDirectChat(label: string, payload: Record<string, unknown>) {
+  if (import.meta.env.DEV) {
+    console.log(`[direct-chat] ${label}`, payload);
+  }
+}
+
+/** STOMP 직후 화면에 바로 보이게; 서버 행 도착 시 같은 본문·발신이면 제거 */
+const LOCAL_DM_PREFIX = "local-dm-";
+
+function dmMessageFingerprint(senderUserId: string, content: string): string {
+  return `${String(senderUserId).trim()}|${content.trim()}`;
+}
+
+function stripOptimisticMatchingFingerprint(
+  list: DmMessage[],
+  senderUserId: string,
+  content: string
+): DmMessage[] {
+  const fp = dmMessageFingerprint(senderUserId, content);
+  return list.filter(
+    (m) =>
+      !String(m.id).startsWith(LOCAL_DM_PREFIX) ||
+      dmMessageFingerprint(m.senderUserId, m.content) !== fp
+  );
+}
 
 const STORAGE_KEY = "khu-nect_dm_rooms";
 const ACCESS_TOKEN_KEY = "khu-nect_access_token";
@@ -89,6 +142,7 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
   const [inboxRevision, setInboxRevision] = useState(0);
   const stompRef = useRef<Client | null>(null);
   const subsRef = useRef<Record<string, StompSubscription>>({});
+  const pendingDirectChatPublishesRef = useRef<PendingDirectPublish[]>([]);
   const serverRoomsByIdRef = useRef<RoomsState>({});
   serverRoomsByIdRef.current = serverRoomsById;
 
@@ -214,13 +268,28 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
       const response = await getDirectChatMessages(roomId, 80);
       const mapped: DmMessage[] = response.messages
         .map((m) => ({
-          id: m.messageId,
+          id: String(m.messageId),
           senderUserId: String(m.senderUserId),
           content: m.content,
           createdAt: m.createdAt,
         }))
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      setServerMessagesByRoomId((prev) => ({ ...prev, [roomId]: mapped }));
+      setServerMessagesByRoomId((prev) => {
+        const prevList = prev[roomId] ?? [];
+        const optimistic = prevList.filter((m) => String(m.id).startsWith(LOCAL_DM_PREFIX));
+        const keptOptimistic = optimistic.filter(
+          (o) =>
+            !mapped.some(
+              (s) =>
+                dmMessageFingerprint(s.senderUserId, s.content) ===
+                dmMessageFingerprint(o.senderUserId, o.content)
+            )
+        );
+        const next = [...mapped, ...keptOptimistic].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt)
+        );
+        return { ...prev, [roomId]: next };
+      });
       bumpInbox();
     },
     [user?.id, bumpInbox]
@@ -229,8 +298,9 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
   const appendServerMessage = useCallback((roomId: string, msg: DmMessage) => {
     setServerMessagesByRoomId((prev) => {
       const list = prev[roomId] ?? [];
-      if (list.some((m) => m.id === msg.id)) return prev;
-      const next = [...list, msg].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      const base = stripOptimisticMatchingFingerprint(list, msg.senderUserId, msg.content);
+      if (base.some((m) => String(m.id) === String(msg.id))) return prev;
+      const next = [...base, msg].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       return { ...prev, [roomId]: next };
     });
     bumpInbox();
@@ -239,30 +309,42 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
   const subscribeOneRoom = useCallback(
     (client: Client, roomId: string) => {
       if (subsRef.current[roomId]) return;
+      devDirectChat("구독 시작", { roomId, subscribePath: `/sub/direct-chat/rooms/${roomId}` });
       subsRef.current[roomId] = client.subscribe(
         `/sub/direct-chat/rooms/${roomId}`,
         (frame: IMessage) => {
+          devDirectChat("STOMP 수신(raw)", {
+            roomId,
+            bodyLength: frame.body?.length ?? 0,
+            bodyPreview: frame.body?.slice(0, 200) ?? "",
+          });
           try {
-            const parsed = JSON.parse(frame.body) as {
-              messageId?: string | number;
-              senderUserId?: number;
-              content?: string;
-              createdAt?: string;
-            };
-            if (!parsed.content) return;
+            const parsed = parseDirectChatStompBody(frame.body);
+            if (!parsed) {
+              devDirectChat("STOMP 수신 파싱 null → GET 갱신(수업 채팅과 동일)", { roomId });
+              void loadRoomMessages(roomId);
+              return;
+            }
+            devDirectChat("STOMP 수신 → 목록 반영", {
+              roomId,
+              messageId: parsed.messageId,
+              senderUserId: parsed.senderUserId,
+              contentLength: parsed.content.length,
+            });
             appendServerMessage(roomId, {
               id: String(parsed.messageId ?? `ws-${Date.now()}`),
               senderUserId: String(parsed.senderUserId ?? ""),
               content: parsed.content,
               createdAt: parsed.createdAt ?? new Date().toISOString(),
             });
-          } catch {
-            // ignore malformed frame
+          } catch (e) {
+            devDirectChat("STOMP 수신 처리 실패 → GET 시도", { roomId, error: String(e) });
+            void loadRoomMessages(roomId);
           }
         }
       );
     },
-    [appendServerMessage]
+    [appendServerMessage, loadRoomMessages]
   );
 
   const prefetchDirectChatRoom = useCallback(
@@ -390,32 +472,82 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
       if (serverRoomsById[roomId]) {
         const trimmed = content.trim();
         if (!trimmed) return;
-        void (async () => {
-          try {
-            await postDirectChatMessage(roomId, trimmed);
-            await loadRoomMessages(roomId);
+        const publishBody = JSON.stringify({ content: trimmed });
+        const destination = directChatStompSendDestination(roomId);
+
+        devDirectChat("sendDm(서버 방) — 수업 채팅과 동일 흐름", {
+          roomId,
+          senderUserId,
+          contentLength: trimmed.length,
+          destination,
+          DIRECT_CHAT_HTTP_SEND,
+          DIRECT_CHAT_WS_ENABLED,
+          stompConnected: stompRef.current?.connected ?? false,
+        });
+
+        appendServerMessage(roomId, {
+          id: `${LOCAL_DM_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          senderUserId: String(senderUserId),
+          content: trimmed,
+          createdAt: new Date().toISOString(),
+        });
+
+        const sendToBackendRoom = () => {
+          if (DIRECT_CHAT_HTTP_SEND) {
+            devDirectChat("경로: REST POST", { roomId, body: { content: trimmed } });
+            void (async () => {
+              try {
+                await postDirectChatMessage(roomId, trimmed);
+                await loadRoomMessages(roomId);
+              } catch (e) {
+                devDirectChat("REST POST 실패", { roomId, error: String(e) });
+                window.alert("메시지를 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+              }
+            })();
             return;
-          } catch {
-            /* REST 미구현·실패 시 기존 STOMP 경로 */
           }
+
+          if (!DIRECT_CHAT_WS_ENABLED) {
+            devDirectChat("경로: STOMP 끔 — GET 폴링만", { roomId });
+            window.setTimeout(() => void loadRoomMessages(roomId), 500);
+            window.setTimeout(() => void loadRoomMessages(roomId), 1800);
+            return;
+          }
+
           const client = stompRef.current;
           if (client?.connected) {
-            client.publish({
-              destination: `/pub/direct-chat/rooms/${roomId}/messages`,
-              body: JSON.stringify({ content: trimmed }),
+            devDirectChat("경로: STOMP publish (연결됨)", {
+              roomId,
+              destination,
+              brokerURL: client.webSocket?.url ?? null,
+              body: { content: trimmed },
             });
-            window.setTimeout(() => void loadRoomMessages(roomId), 400);
+            client.publish({
+              destination,
+              body: publishBody,
+              headers: STOMP_JSON_HEADERS,
+            });
+            window.setTimeout(() => void loadRoomMessages(roomId), 500);
             window.setTimeout(() => void loadRoomMessages(roomId), 1800);
-          } else {
-            window.alert(
-              "메시지를 서버에 보내지 못했습니다. WebSocket 연결을 확인하거나 잠시 후 다시 시도해 주세요."
-            );
+            return;
           }
-        })();
+
+          const q = pendingDirectChatPublishesRef.current;
+          q.push({ destination, body: publishBody, roomId });
+          devDirectChat("경로: STOMP 대기열 (WS 미연결)", {
+            roomId,
+            destination,
+            대기개수: q.length,
+            설명: "연결되면 publish 후 GET으로 확인",
+          });
+        };
+
+        sendToBackendRoom();
         return;
       }
       const trimmed = content.trim();
       if (!trimmed) return;
+      devDirectChat("sendDm 로컬 전용 방(서버 전송 없음)", { roomId, contentLength: trimmed.length });
       const msg: DmMessage = {
         id: `dm-m-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         senderUserId,
@@ -435,7 +567,7 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
       });
       bumpInbox();
     },
-    [bumpInbox, serverRoomsById, loadRoomMessages]
+    [bumpInbox, serverRoomsById, loadRoomMessages, appendServerMessage]
   );
 
   const markDmRoomRead = useCallback(
@@ -562,6 +694,7 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
   }, [user?.id, serverRoomsById, loadRoomMessages]);
 
   useEffect(() => {
+    if (!DIRECT_CHAT_WS_ENABLED) return;
     const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
     if (!token || !user?.id || user.id.startsWith("demo-user-")) return;
 
@@ -577,16 +710,59 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
         connectHeaders: {
           Authorization: `Bearer ${token}`,
         },
-        reconnectDelay: 5000,
+        reconnectDelay: stompReconnectDelayMs(),
         heartbeatIncoming: 10000,
         heartbeatOutgoing: 10000,
         onConnect: () => {
           connected = true;
-          Object.keys(serverRoomsByIdRef.current).forEach((roomId) => {
-            subscribeOneRoom(client, roomId);
+          const roomIds = Object.keys(serverRoomsByIdRef.current);
+          devDirectChat("STOMP 연결됨", { brokerURL, roomCount: roomIds.length, roomIds });
+          roomIds.forEach((rid) => {
+            subscribeOneRoom(client, rid);
+          });
+
+          const pubClient = stompRef.current;
+          if (pubClient?.connected) {
+            const batch = pendingDirectChatPublishesRef.current.splice(0);
+            if (import.meta.env.DEV && batch.length > 0) {
+              console.log("[direct-chat] STOMP 대기열 flush", {
+                count: batch.length,
+                items: batch.map((p) => ({ roomId: p.roomId, destination: p.destination })),
+              });
+            }
+            for (const p of batch) {
+              pubClient.publish({
+                destination: p.destination,
+                body: p.body,
+                headers: STOMP_JSON_HEADERS,
+              });
+            }
+            const refreshRooms = new Set(batch.map((p) => p.roomId));
+            for (const rid of refreshRooms) {
+              window.setTimeout(() => void loadRoomMessages(rid), 450);
+            }
+          }
+        },
+        onStompError: (frame) => {
+          devDirectChat("STOMP 에러 프레임", {
+            brokerURL,
+            headers: frame.headers,
+            body: frame.body?.slice(0, 500),
           });
         },
+        onWebSocketError: (evt) => {
+          const e = evt as Event;
+          devDirectChat("WebSocket 에러", {
+            brokerURL,
+            type: e?.type,
+            isTrusted: e?.isTrusted,
+          });
+        },
+        onDisconnect: () => {
+          devDirectChat("STOMP 연결 해제", { brokerURL });
+        },
         onWebSocketClose: () => {
+          devDirectChat("WebSocket close", { brokerURL, hadConnected: connected });
           if (!connected && idx + 1 < wsBrokerURLs.length) {
             activateWithFallback(idx + 1);
           }
@@ -604,9 +780,11 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
       activeClient?.deactivate();
       stompRef.current = null;
     };
-  }, [user?.id, serverRoomsById, wsBrokerURLs, subscribeOneRoom]);
+    // deps에 serverRoomsById 넣지 않음 — 폴링마다 새 객체로 STOMP가 끊겼다가 /ws부터 재시도하는 문제 방지
+  }, [user?.id, wsBrokerURLs, subscribeOneRoom, loadRoomMessages]);
 
   useEffect(() => {
+    if (!DIRECT_CHAT_WS_ENABLED) return;
     const client = stompRef.current;
     if (!client?.connected) return;
     Object.keys(serverRoomsById).forEach((roomId) => subscribeOneRoom(client, roomId));

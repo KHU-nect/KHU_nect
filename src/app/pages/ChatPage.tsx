@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "../context/AuthContext";
 import { useDmChat } from "../context/DmChatContext";
 import type { DmMessage, DmRoom } from "../types/dmChat";
+import { sameAppUserId } from "../utils/userIdMatch";
 
 function formatDmTime(iso: string) {
   const d = new Date(iso);
@@ -97,6 +98,7 @@ export function ChatPage() {
     sendDm,
     markDmRoomRead,
     inboxRevision,
+    prefetchDirectChatRoom,
   } = useDmChat();
   const [messageInput, setMessageInput] = useState("");
   const dmScrollRef = useRef<HTMLDivElement>(null);
@@ -115,6 +117,13 @@ export function ChatPage() {
     if (!openRoomId || !user?.id || !currentRoom) return;
     markDmRoomRead(user.id, openRoomId);
   }, [openRoomId, user?.id, currentRoom?.id, currentRoom?.messages.length, markDmRoomRead]);
+
+  /** 새로고침 직후엔 방 목록 요약만 있어서, 서버 방 입장 시 전체 히스토리 GET */
+  useEffect(() => {
+    if (!openRoomId || !user?.id || user.id.startsWith("demo-user-")) return;
+    if (!currentRoom?.isServerRoom) return;
+    void prefetchDirectChatRoom(openRoomId);
+  }, [openRoomId, user?.id, currentRoom?.isServerRoom, prefetchDirectChatRoom]);
 
   useLayoutEffect(() => {
     if (!openRoomId || !currentRoom) return;
@@ -138,7 +147,7 @@ export function ChatPage() {
   };
 
   const renderDmBubble = (msg: DmMessage, meId: string) => {
-    const mine = msg.senderUserId === meId;
+    const mine = sameAppUserId(meId, msg.senderUserId);
     return (
       <div
         key={msg.id}

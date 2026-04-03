@@ -21,6 +21,7 @@ import {
   postCourseChatMessage,
 } from "../api/courseChatApi";
 import { buildStompBrokerUrls } from "../utils/stompBrokerUrls";
+import { stompReconnectDelayMs } from "../utils/stompReconnectDelayMs";
 import { parseBackendInstantMs } from "../utils/parseBackendInstant";
 import { isSitTogetherPendingExpired } from "../utils/sitTogetherExpiry";
 import { sameAppUserId } from "../utils/userIdMatch";
@@ -58,18 +59,6 @@ const COURSE_CHAT_HTTP_SEND =
 /** `false`면 STOMP(WebSocket) 비활성 — 백엔드에 WS 없을 때 콘솔 재시도 스팸 방지. HTTP 폴링(7초)은 유지 */
 const CLASS_CHAT_WS_ENABLED =
   String(import.meta.env.VITE_CLASS_CHAT_WS ?? "true").toLowerCase() !== "false";
-
-/**
- * STOMP 재연결 간격(ms). `0`이면 자동 재연결 끔(@stomp/stompjs 규약).
- * 미설정 시 5000. 서버 WS 미구동 시 스팸 줄이려면 `30000` 또는 `0` + WS 끄기 권장.
- */
-function stompReconnectDelayMs(): number {
-  const raw = import.meta.env.VITE_STOMP_RECONNECT_DELAY_MS as string | undefined;
-  if (raw === undefined || raw === "") return 5000;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return 5000;
-  return n;
-}
 
 function parseTimeMs(iso: string | undefined): number | null {
   return parseBackendInstantMs(iso ?? null);
