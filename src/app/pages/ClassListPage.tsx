@@ -9,6 +9,7 @@ import {
   groupCoursesBySubject,
 } from "../utils/courseGroups";
 import { getCourseListenerCount } from "../utils/courseListenerCount";
+import { getCourseAccentColor } from "../utils/courseAccentColor";
 
 export function ClassListPage() {
   const { courses } = useTimetable();
@@ -77,9 +78,13 @@ export function ClassListPage() {
             <div className="flex items-start justify-between mb-3">
               <div className="flex-1 min-w-0 pr-3">
                 <div className="flex items-center gap-2 mb-1">
-                  <div 
+                  <div
                     className="w-1 h-4 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: group.type === "major" ? "#A71930" : "#E6A620" }}
+                    style={{
+                      backgroundColor: getCourseAccentColor(
+                        `${group.representativeId}:${group.name}:${group.professor}`
+                      ),
+                    }}
                   />
                   <h3 className="font-bold text-gray-900 text-sm truncate">
                     {group.name}

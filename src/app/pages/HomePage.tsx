@@ -41,6 +41,10 @@ export function HomePage() {
 
   const { user } = useAuth();
   const { profile } = useProfile();
+  const homeNickname = useMemo(() => {
+    const n = profile?.nickname?.trim() || user?.nickname?.trim();
+    return n || "쿠옹이";
+  }, [profile?.nickname, user?.nickname]);
   const viewerHobbies = useMemo(() => resolveViewerHobbies(profile), [profile]);
   const { openDmFromFreeSlotPeer } = useOpenDmFromFreeSlotPeer();
   const { courses } = useTimetable();
@@ -97,7 +101,7 @@ export function HomePage() {
         <h1 className="text-2xl font-bold flex items-center gap-2" style={{ color: "#A71930" }}>
           🦁 오늘의 쿠넥트
         </h1>
-        <p className="text-sm text-gray-500">좋은 하루 되세요, 쿠옹이님!</p>
+        <p className="text-sm text-gray-500">좋은 하루 되세요, {homeNickname}님!</p>
       </div>
 
       {/* Main Content */}
@@ -305,7 +309,7 @@ export function HomePage() {
           setProfileDialogOpen(false);
           if (peer) void openDmFromFreeSlotPeer(peer);
         }}
-        onRequestMatch={() => setProfileDialogOpen(false)}
+        showOutlineCloseButton
         user={
           selectedUser
             ? {

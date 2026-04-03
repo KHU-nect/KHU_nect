@@ -179,9 +179,8 @@ export function ClassMatchingPage() {
     setProfileDialogOpen(true);
   };
 
-  const handleStartChat = useCallback(
-    (e: MouseEvent<HTMLButtonElement>, mate: BackendClassMate) => {
-      e.stopPropagation();
+  const startClassMatchChat = useCallback(
+    (mate: BackendClassMate) => {
       if (!user?.id) return;
 
       const numericUserId = /^\d+$/.test(mate.userId) ? Number(mate.userId) : NaN;
@@ -234,6 +233,14 @@ export function ClassMatchingPage() {
       prefetchDirectChatRoom,
       recordMatchSuccessAlert,
     ]
+  );
+
+  const handleStartChat = useCallback(
+    (e: MouseEvent<HTMLButtonElement>, mate: BackendClassMate) => {
+      e.stopPropagation();
+      startClassMatchChat(mate);
+    },
+    [startClassMatchChat]
   );
 
   return (
@@ -450,6 +457,13 @@ export function ClassMatchingPage() {
       <UserProfileDialog
         isOpen={isProfileDialogOpen}
         onClose={() => setProfileDialogOpen(false)}
+        viewerHobbies={user?.id && !isDemoUser ? userHobbies : undefined}
+        onSendMessage={() => {
+          const mate = selectedUser;
+          setProfileDialogOpen(false);
+          if (mate) startClassMatchChat(mate);
+        }}
+        showOutlineCloseButton
         user={
           selectedUser
             ? {

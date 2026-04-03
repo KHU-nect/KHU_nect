@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { LionAvatar } from "./LionAvatar";
-import { Mail, Calendar, Heart, MessageCircle, ThumbsUp, Star, Sparkles } from "lucide-react";
+import { Mail, Calendar, Heart, MessageCircle, ThumbsUp, Star, Sparkles, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { useState } from "react";
 import { Textarea } from "./ui/textarea";
@@ -32,6 +32,8 @@ interface UserProfileDialogProps {
   showReviewButton?: boolean;
   onSendMessage?: () => void;
   onRequestMatch?: () => void;
+  /** 아웃라인 스타일 두 번째 버튼을 「닫기」로 표시 (홈 공강 프로필 등) */
+  showOutlineCloseButton?: boolean;
 }
 
 function profileTitle(user: NonNullable<UserProfileDialogProps["user"]>): string {
@@ -55,6 +57,7 @@ export function UserProfileDialog({
   showReviewButton = false,
   onSendMessage,
   onRequestMatch,
+  showOutlineCloseButton = false,
 }: UserProfileDialogProps) {
   const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
   const [reviewText, setReviewText] = useState("");
@@ -117,9 +120,11 @@ export function UserProfileDialog({
                 <span className="text-sm font-semibold text-white">오늘의 질문</span>
               </div>
               {todayQuestion ? (
-                <p className="text-base font-bold leading-snug text-white">{todayQuestion}</p>
+                <p className="text-xl font-extrabold leading-snug tracking-tight text-white">
+                  {todayQuestion}
+                </p>
               ) : (
-                <p className="text-sm font-medium leading-snug text-white/90">
+                <p className="text-base font-semibold leading-snug text-white/90">
                   아직 등록된 질문이 없어요.
                 </p>
               )}
@@ -180,32 +185,51 @@ export function UserProfileDialog({
               </div>
             )}
 
-            <div className="flex gap-3 pt-1">
-              <Button
-                type="button"
-                className="h-12 flex-1 rounded-xl border-0 font-semibold text-white shadow-sm hover:opacity-95"
-                style={{ backgroundColor: PROFILE_BRAND }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onSendMessage?.();
-                }}
-              >
-                <Mail className="mr-2 h-4 w-4" />
-                메시지 보내기
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-12 flex-1 rounded-xl border-2 border-gray-200 bg-white font-semibold text-gray-900 hover:bg-gray-50"
-                onClick={() => {
-                  onRequestMatch?.();
-                }}
-              >
-                <Calendar className="mr-2 h-4 w-4" />
-                매칭 신청
-              </Button>
-            </div>
+            {(onSendMessage || onRequestMatch || showOutlineCloseButton) && (
+              <div className="flex gap-3 pt-1">
+                {onSendMessage && (
+                  <Button
+                    type="button"
+                    className="h-12 flex-1 rounded-xl border-0 font-semibold text-white shadow-sm hover:opacity-95"
+                    style={{ backgroundColor: PROFILE_BRAND }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onSendMessage();
+                    }}
+                  >
+                    <Mail className="mr-2 h-4 w-4" />
+                    메시지 보내기
+                  </Button>
+                )}
+                {onRequestMatch && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 flex-1 rounded-xl border-2 border-gray-200 bg-white font-semibold text-gray-900 hover:bg-gray-50"
+                    onClick={() => {
+                      onRequestMatch();
+                    }}
+                  >
+                    <Calendar className="mr-2 h-4 w-4" />
+                    매칭 신청
+                  </Button>
+                )}
+                {showOutlineCloseButton && !onRequestMatch && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12 flex-1 rounded-xl border-2 border-gray-200 bg-white font-semibold text-gray-900 hover:bg-gray-50"
+                    onClick={() => {
+                      onClose();
+                    }}
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    닫기
+                  </Button>
+                )}
+              </div>
+            )}
 
             {showReviewButton && (
               <Button
