@@ -1,0 +1,131 @@
+================================================================================
+KHU-nect 프론트엔드 — 코드 흐름 요약 (설명용)
+================================================================================
+작성 목적: 전체 구조를 한 번에 훑고, 다른 사람에게 말로 풀 수 있게 하기 위함.
+(경로는 모두 src/app/ 기준 상대 경로로 표기)
+
+--------------------------------------------------------------------------------
+1. 앱이 켜지는 순서
+--------------------------------------------------------------------------------
+• main.tsx
+  - dev 콘솔 정리 등 부트스트랩 후, React 루트에 App을 마운트.
+  - 전역 스타일: src/styles/index.css (Pretendard 폰트, Tailwind, theme)
+
+• App.tsx
+  - AppProviders로 전역 상태(Context)를 감싼 뒤, react-router의 RouterProvider에
+    routes.tsx에서 만든 router를 넘김.
+
+• AppProviders.tsx (Provider 중첩 순서 — 바깥 → 안쪽)
+  1) AuthProvider      … 로그인 사용자(user), 토큰, 로그인/로그아웃
+  2) ProfileProvider   … 프로필(닉네임, 학과, 취미 등) — 로컬/서버 연동 포함
+  3) TimetableProvider … 내 시간표(수업 목록)
+  4) ClassChatProvider … 과목(수업) 단위 오픈 채팅 + STOMP 실시간
+  5) DmChatProvider    … 1:1 DM 방 목록, 메시지, STOMP 실시간
+
+  → 하위 페이지·컴포넌트는 useAuth, useProfile, useTimetable, useClassChat,
+    useDmChat 훅으로 각각 접근.
+
+--------------------------------------------------------------------------------
+2. 화면 이동(라우팅)
+--------------------------------------------------------------------------------
+파일: routes.tsx (createBrowserRouter)
+
+• "/"                    LoginPage
+• "/onboarding-profile"  OnboardingProfilePage (초기 프로필)
+• "/onboarding"          OnboardingPage
+• "/onboarding-complete" OnboardingCompletePage
+• "/auth/callback"       AuthCallbackPage (OAuth 등 콜백)
+
+• "/home"                Layout(하단 탭/공통 레이아웃) + 자식 라우트:
+    /home                 HomePage (대시)
+    /home/timetable       TimetablePage
+    /home/my-timetable    MyTimetablePage
+    /home/classes         ClassListPage (내 수업 목록)
+    /home/class/:id       ClassPage (수업별 채팅 진입)
+    /home/chat            ChatPage (1:1 목록·대화)
+    /home/matching        MatchingPage (공강 매칭)
+    /home/hobby-matching  HobbyMatchingPage
+    /home/class-matching  ClassMatchingPage
+    /home/mypage          MyPage
+
+--------------------------------------------------------------------------------
+3. API·네트워크 레이어
+--------------------------------------------------------------------------------
+• api/client.ts
+  - VITE_API_BASE_URL (기본 localhost:8080)로 fetch.
+  - access/refresh 토큰은 localStorage, 401 시 refresh 시도 등 공통 처리.
+
+• 도메인별 모듈 (대표 역할만)
+  - userApi.ts        사용자/프로필 관련
+  - timetableApi.ts, courseApi.ts  시간표·과목
+  - courseChatApi.ts  수업(과목) 채팅 REST
+  - directChatApi.ts  1:1 DM REST
+  - matchingApi.ts    공강·수업 매칭 후보 등
+  - matchPostApi.ts   매칭 포스트 수락 등
+  - interestApi.ts    관심사(취미) 목록
+
+• 실시간(STOMP)
+  - ClassChatContext, DmChatContext 안에서 WebSocket(STOMP) 구독/발행.
+  - broker URL·파싱 유틸: utils/stompBrokerUrls.ts, parseDirectChatStomp.ts 등.
+
+--------------------------------------------------------------------------------
+4. 화면(페이지)과 데이터 흐름 — 짧게 매핑
+--------------------------------------------------------------------------------
+• 로그인 / 콜백
+  LoginPage, AuthCallbackPage → AuthContext + backendAuth·userApi와 연결.
+
+• 온보딩
+  Onboarding* 페이지들 → ProfileContext, Timetable 등과 맞물려 첫 설정.
+
+• 홈 HomePage
+  - TimetableContext(다음 수업 등), ClassChat(미리보기), 공강 쿠옹이 목록
+    (실계정: matchingApi, 데모: mocks/freeSlotPeers).
+  - 카드 클릭 → UserProfileDialog + useOpenDmFromFreeSlotPeer로 DM 시도.
+
+• 수업 목록 ClassListPage
+  - groupCoursesBySubject(utils/courseGroups)로 목록 구성.
+  - 카드 왼쪽 색 막대: utils/courseAccentColor (과목 키 기준 고정 색).
+  - 링크 → /home/class/:id
+
+• 수업 채팅 ClassPage → ClassChatThread 등
+  - ClassChatContext가 courseId 기준 메시지·같이 앉기·질문 모드 등 처리.
+
+• 1:1 ChatPage
+  - DmChatContext: 방 목록, 방 선택 시 메시지, STOMP.
+
+• 매칭
+  - MatchingPage: 공강 매칭 UI + UserProfileDialog(메시지/매칭 신청 등).
+  - ClassMatchingPage: 같은 수업 쿠옹이, 대화하기/프로필 모달에서
+    acceptMatching·matchPostApi·DmChat 연동.
+  - HobbyMatchingPage: 취미 매칭 목록·프로필 다이얼로그.
+
+• 마이 / 시간표
+  MyPage, MyTimetablePage, TimetablePage → Profile·Timetable Context 및
+  timetableStorage, course 검색 mocks 등.
+
+--------------------------------------------------------------------------------
+5. 목(mock) vs 실서버
+--------------------------------------------------------------------------------
+• 로그인 사용자는 matchingApi, userApi, directChatApi 등으로 백엔드와 통신.
+
+• freeSlotPeers.ts 의 FREE_SLOT_PEERS 등은 로컬 목업 데이터(스토리·개발 참고)로만 남아 있을 수 있음.
+
+--------------------------------------------------------------------------------
+6. 자주 쓰는 공용 UI·유틸
+--------------------------------------------------------------------------------
+• components/Layout.tsx     /home 하위 공통 레이아웃·내비
+• UserProfileDialog.tsx     상대 프로필 모달(메시지/닫기/매칭 신청 등 props로 분기)
+• LionAvatar.tsx            학과 기반 아바타 색
+• utils/courseKey.ts        과목명+교수 키 (매칭·공통 수업 비교)
+• utils/backendAuth.ts      토큰·리다이렉트 보조
+
+--------------------------------------------------------------------------------
+7. 한 줄로 말하면
+--------------------------------------------------------------------------------
+「main에서 App을 띄우고, AppProviders로 인증·프로필·시간표·수업채팅·DM 상태를
+ 올려 둔 다음, routes로 페이지를 나누고, 각 페이지는 Context + api/* + 필요 시
+ mocks로 화면을 채운다. 실시간 채팅은 두 Context 안에서 STOMP로 붙는다.」
+
+================================================================================
+(끝)
+================================================================================

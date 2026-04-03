@@ -9,7 +9,6 @@ import { getFreePeriodMatches, mapFreePeriodUsersToPeers } from "../api/matching
 import { useOpenDmFromFreeSlotPeer } from "../hooks/useOpenDmFromFreeSlotPeer";
 import { getMyInterests, type MyInterest } from "../api/interestApi";
 import {
-  getPeersForMatchingTab,
   peerCardHeadline,
   peerCardIntro,
   peerCardQuote,
@@ -22,7 +21,6 @@ export function MatchingPage() {
   const { profile } = useProfile();
   const { openDmFromFreeSlotPeer } = useOpenDmFromFreeSlotPeer();
   const userHobbies = useMemo(() => resolveViewerHobbies(profile), [profile]);
-  const isDemoUser = user?.id?.startsWith("demo-user-") ?? false;
 
   const [selectedFilter, setSelectedFilter] = useState<"all" | string>("all");
   const [acceptedMatches, setAcceptedMatches] = useState<
@@ -32,7 +30,6 @@ export function MatchingPage() {
   const [dismissedIds, setDismissedIds] = useState<Set<number>>(new Set());
   const [isProfileDialogOpen, setProfileDialogOpen] = useState(false);
   const [profilePeer, setProfilePeer] = useState<FreeSlotPeer | undefined>(undefined);
-  const [timeKey, setTimeKey] = useState(0);
   const [backendPeers, setBackendPeers] = useState<FreeSlotPeer[]>([]);
   const [loadingPeers, setLoadingPeers] = useState(false);
   const [interestIdByName, setInterestIdByName] = useState<Record<string, number>>({});
@@ -40,14 +37,7 @@ export function MatchingPage() {
   const [interestsLoaded, setInterestsLoaded] = useState(false);
 
   useEffect(() => {
-    const id = window.setInterval(() => setTimeKey((k) => k + 1), 30000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  const now = useMemo(() => new Date(), [timeKey]);
-
-  useEffect(() => {
-    if (!user?.id || isDemoUser) {
+    if (!user?.id) {
       setInterestIdByName({});
       setMyInterests([]);
       setInterestsLoaded(false);
@@ -82,11 +72,11 @@ export function MatchingPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, isDemoUser]);
+  }, [user?.id]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!user?.id || isDemoUser) {
+    if (!user?.id) {
       setBackendPeers([]);
       setLoadingPeers(false);
       return;
@@ -125,17 +115,12 @@ export function MatchingPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, isDemoUser, selectedFilter, interestIdByName, interestsLoaded]);
+  }, [user?.id, selectedFilter, interestIdByName, interestsLoaded]);
 
   const matchQueue = useMemo(() => {
-    if (!isDemoUser && user?.id) {
-      return backendPeers.filter((p) => !dismissedIds.has(p.id));
-    }
-    const filter: "all" | string = selectedFilter === "all" ? "all" : selectedFilter;
-    return getPeersForMatchingTab(userHobbies, filter, now, user?.id).filter(
-      (p) => !dismissedIds.has(p.id)
-    );
-  }, [isDemoUser, user?.id, backendPeers, dismissedIds, userHobbies, selectedFilter, now]);
+    if (!user?.id) return [];
+    return backendPeers.filter((p) => !dismissedIds.has(p.id));
+  }, [user?.id, backendPeers, dismissedIds]);
 
   const currentCard = matchQueue[0];
 
@@ -150,29 +135,19 @@ export function MatchingPage() {
 
   useEffect(() => {
     if (selectedFilter === "all") return;
-    if (isDemoUser) {
-      if (!userHobbies.includes(selectedFilter)) setSelectedFilter("all");
-    } else {
-      if (!myInterests.some((i) => i.name === selectedFilter)) setSelectedFilter("all");
-    }
-  }, [userHobbies, myInterests, selectedFilter, isDemoUser]);
+    if (!myInterests.some((i) => i.name === selectedFilter)) setSelectedFilter("all");
+  }, [myInterests, selectedFilter]);
 
   const filterChips = useMemo(() => {
     const chips: { id: "all" | string; label: string }[] = [{ id: "all", label: "전체" }];
-    if (isDemoUser || !user?.id) {
-      userHobbies.forEach((h) => chips.push({ id: h, label: h }));
-    } else {
-      myInterests.forEach((i) => chips.push({ id: i.name, label: i.name }));
-    }
+    myInterests.forEach((i) => chips.push({ id: i.name, label: i.name }));
     return chips;
-  }, [isDemoUser, user?.id, userHobbies, myInterests]);
+  }, [myInterests]);
 
-  /** 실계정: 칩·매칭률은 API 관심사 기준, 데모는 프로필 취미 */
   const viewerInterestNames = useMemo(() => {
-    if (isDemoUser) return userHobbies;
     const names = myInterests.map((i) => i.name);
     return names.length > 0 ? names : userHobbies;
-  }, [isDemoUser, myInterests, userHobbies]);
+  }, [myInterests, userHobbies]);
 
   const highlightInterestSet = useMemo(
     () => new Set(viewerInterestNames),
@@ -209,18 +184,10 @@ export function MatchingPage() {
     sendMessageToPeer(currentCard);
   }, [currentCard, sendMessageToPeer]);
 
-  const totalInFilter = useMemo(
-    () => {
-      if (!isDemoUser && user?.id) return backendPeers.length;
-      return getPeersForMatchingTab(
-        userHobbies,
-        selectedFilter === "all" ? "all" : selectedFilter,
-        now,
-        user?.id
-      ).length;
-    },
-    [isDemoUser, user?.id, backendPeers.length, userHobbies, selectedFilter, now]
-  );
+  const totalInFilter = useMemo(() => {
+    if (!user?.id) return 0;
+    return backendPeers.length;
+  }, [user?.id, backendPeers.length]);
 
   const noneAvailable = totalInFilter === 0;
 
@@ -234,8 +201,7 @@ export function MatchingPage() {
       </div>
 
       <div className="px-5 py-5">
-        {((isDemoUser && userHobbies.length === 0) ||
-          (!isDemoUser && interestsLoaded && myInterests.length === 0)) && (
+        {interestsLoaded && myInterests.length === 0 && (
           <div className="mb-4 rounded-2xl border-2 border-amber-200 bg-[#FDF5E6] px-4 py-3 text-sm text-gray-700">
             <p className="font-semibold text-[#A71930] mb-1">취미·관심사를 추가해 주세요</p>
             <p className="text-xs text-gray-600 mb-2">
@@ -287,11 +253,11 @@ export function MatchingPage() {
           })}
         </div>
 
-        {loadingPeers && !isDemoUser ? (
+        {loadingPeers ? (
           <div className="bg-white rounded-2xl shadow-lg p-10 text-center text-sm text-gray-500">
             매칭 목록 불러오는 중...
           </div>
-        ) : (isDemoUser ? userHobbies.length > 0 : true) && currentCard ? (
+        ) : currentCard ? (
           <div className="relative">
             {showResult && (
               <div
@@ -405,7 +371,7 @@ export function MatchingPage() {
               </div>
             </div>
           </div>
-        ) : (isDemoUser ? userHobbies.length > 0 : true) ? (
+        ) : (
           <div className="bg-white rounded-2xl shadow-lg p-10 text-center">
             <div className="text-7xl mb-4">🦁</div>
             <h3 className="text-xl font-bold text-gray-800 mb-2">
@@ -425,7 +391,7 @@ export function MatchingPage() {
               처음부터 다시 보기
             </button>
           </div>
-        ) : null}
+        )}
 
         {acceptedMatches.length > 0 && (
           <div className="mt-6 bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
@@ -464,7 +430,7 @@ export function MatchingPage() {
       <UserProfileDialog
         isOpen={isProfileDialogOpen}
         onClose={() => setProfileDialogOpen(false)}
-        viewerHobbies={!isDemoUser ? viewerInterestNames : undefined}
+        viewerHobbies={viewerInterestNames}
         onSendMessage={() => {
           const peer = profilePeer;
           setProfileDialogOpen(false);

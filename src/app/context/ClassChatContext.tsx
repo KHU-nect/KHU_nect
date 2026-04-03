@@ -461,7 +461,7 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
 
   const loadCourseMessages = useCallback(
     async (courseId: string, roomId: string) => {
-      if (!user?.id || user.id.startsWith("demo-user-")) return;
+      if (!user?.id) return;
       try {
         const response = await getCourseChatMessages(roomId, 80);
         const mapped: ClassChatMessage[] = [];
@@ -481,10 +481,7 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
         });
         setMessagesByCourseId((prev) => {
           const uid = user?.id;
-          const merged =
-            uid && !uid.startsWith("demo-user-")
-              ? mergeServerAndPendingLocals(mapped, prev[courseId], uid)
-              : mapped;
+          const merged = uid ? mergeServerAndPendingLocals(mapped, prev[courseId], uid) : mapped;
           return { ...prev, [courseId]: merged };
         });
       } catch (e) {
@@ -503,7 +500,7 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
 
   const bindCourseRoom = useCallback(
     async (courseId: string, serverCourseId?: number) => {
-      if (!serverCourseId || !user?.id || user.id.startsWith("demo-user-")) return;
+      if (!serverCourseId || !user?.id) return;
       try {
         const entered = await enterCourseChatRoom(serverCourseId, true);
         const roomId = String(entered.roomId);
@@ -538,7 +535,7 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
   coursesRef.current = courses;
 
   useEffect(() => {
-    if (!user?.id || user.id.startsWith("demo-user-")) return;
+    if (!user?.id) return;
     if (!timetableChatKey) return;
     let cancelled = false;
 
@@ -712,7 +709,7 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
       };
 
       const mappedRoomId = courseRoomMap[courseId];
-      if (user?.id && !user.id.startsWith("demo-user-")) {
+      if (user?.id) {
         if (mappedRoomId) {
           tryPublishOrQueue(mappedRoomId, true);
           return;
@@ -754,19 +751,6 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
           courseId,
           이유: "roomId 없음 + sendMessage에 serverCourseId 없음 → 로컬 낙관적만",
         });
-        return;
-      }
-
-      // 데모 계정: 실서버 방이 매핑된 경우에도 HTTP 우선(실계정과 동일)
-      if (mappedRoomId) {
-        setMessagesByCourseId((prev) => ({
-          ...prev,
-          [courseId]: [
-            ...(prev[courseId] ?? []),
-            buildOptimisticClassMessage(courseId, mode, trimmed, senderLabel, senderUserId),
-          ],
-        }));
-        sendToBackendRoom(mappedRoomId, courseId);
         return;
       }
 
@@ -822,7 +806,7 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (!user?.id || user.id.startsWith("demo-user-")) return;
+    if (!user?.id) return;
     const entries = Object.entries(courseRoomMap);
     if (entries.length === 0) return;
     const tick = async () => {
@@ -838,7 +822,7 @@ export function ClassChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!CLASS_CHAT_WS_ENABLED) return;
     const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (!token || !user?.id || user.id.startsWith("demo-user-")) return;
+    if (!token || !user?.id) return;
     let activeClient: Client | null = null;
     const tried = new Set<number>();
 

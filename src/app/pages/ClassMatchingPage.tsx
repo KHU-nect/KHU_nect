@@ -15,11 +15,7 @@ import {
 } from "../api/matchingApi";
 import { getMyInterests, type MyInterest } from "../api/interestApi";
 import { acceptMatchPost } from "../api/matchPostApi";
-import {
-  computeClassMatches,
-  firstSharedCourseId,
-  isDemoAccountUserId,
-} from "../mocks/classMatchPeers";
+import { firstSharedCourseId } from "../mocks/classMatchPeers";
 import { resolveViewerHobbies } from "../utils/resolveViewerHobbies";
 
 type BackendClassMate = ClassMatchMateRow;
@@ -46,27 +42,14 @@ export function ClassMatchingPage() {
 
   const userHobbies = useMemo(() => resolveViewerHobbies(profile), [profile]);
 
-  const mates = useMemo(() => {
-    if (!isDemoAccountUserId(user?.id)) return backendMates;
-    const raw = computeClassMatches(courses, { excludeUserId: user?.id });
-    if (selectedFilter === "all") return raw;
-    return raw.filter((m) => m.hobbies.includes(selectedFilter));
-  }, [courses, user?.id, backendMates, selectedFilter]);
-
-  const isDemoUser = isDemoAccountUserId(user?.id);
-
   const filterChips = useMemo(() => {
     const chips: { id: "all" | string; label: string }[] = [{ id: "all", label: "전체" }];
-    if (isDemoUser || !user?.id) {
-      userHobbies.forEach((h) => chips.push({ id: h, label: h }));
-    } else {
-      myInterests.forEach((i) => chips.push({ id: i.name, label: i.name }));
-    }
+    myInterests.forEach((i) => chips.push({ id: i.name, label: i.name }));
     return chips;
-  }, [isDemoUser, user?.id, userHobbies, myInterests]);
+  }, [myInterests]);
 
   useEffect(() => {
-    if (!user?.id || isDemoUser) {
+    if (!user?.id) {
       setInterestIdByName({});
       setMyInterests([]);
       setInterestsLoaded(false);
@@ -101,20 +84,16 @@ export function ClassMatchingPage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, isDemoUser]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (selectedFilter === "all") return;
-    if (isDemoUser) {
-      if (!userHobbies.includes(selectedFilter)) setSelectedFilter("all");
-    } else {
-      if (!myInterests.some((i) => i.name === selectedFilter)) setSelectedFilter("all");
-    }
-  }, [userHobbies, myInterests, selectedFilter, isDemoUser]);
+    if (!myInterests.some((i) => i.name === selectedFilter)) setSelectedFilter("all");
+  }, [myInterests, selectedFilter]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!user?.id || isDemoUser) {
+    if (!user?.id) {
       setBackendMates([]);
       setLoadingMates(false);
       return;
@@ -160,14 +139,7 @@ export function ClassMatchingPage() {
     return () => {
       cancelled = true;
     };
-  }, [
-    user?.id,
-    isDemoUser,
-    selectedFilter,
-    interestIdByName,
-    interestsLoaded,
-    courses,
-  ]);
+  }, [user?.id, selectedFilter, interestIdByName, interestsLoaded, courses]);
 
   const accepterLabel = useMemo(() => {
     const dept = profile?.department?.trim();
@@ -206,7 +178,7 @@ export function ClassMatchingPage() {
             recordMatchSuccessAlert(user.id, roomId, mate.name);
             return;
           }
-          if (!isDemoUser && Number.isFinite(numericUserId)) {
+          if (Number.isFinite(numericUserId)) {
             const { directChatRoomId } = await acceptMatching(numericUserId);
             await refreshServerRooms();
             await prefetchDirectChatRoom(directChatRoomId);
@@ -215,7 +187,7 @@ export function ClassMatchingPage() {
           }
           acceptWithLocal();
         } catch {
-          if (!isDemoUser && Number.isFinite(numericUserId)) {
+          if (Number.isFinite(numericUserId)) {
             window.alert("채팅방을 열지 못했어요. 잠시 후 다시 시도해 주세요.");
             return;
           }
@@ -225,7 +197,6 @@ export function ClassMatchingPage() {
     },
     [
       user?.id,
-      isDemoUser,
       courses,
       createRoomFromClassMatch,
       accepterLabel,
@@ -264,10 +235,7 @@ export function ClassMatchingPage() {
       </div>
 
       <div className="relative z-0 px-4 py-5 space-y-4">
-        {user?.id &&
-          !isDemoUser &&
-          interestsLoaded &&
-          myInterests.length === 0 && (
+        {user?.id && interestsLoaded && myInterests.length === 0 && (
             <div className="rounded-2xl border-2 border-amber-200 bg-[#FDF5E6] px-4 py-3 text-sm text-gray-700">
               <p className="font-semibold text-[#A71930] mb-1">취미·관심사를 추가해 주세요</p>
               <p className="text-xs text-gray-600 mb-2">
@@ -330,19 +298,17 @@ export function ClassMatchingPage() {
                 내 시간표: {courses.length}개 수업
               </p>
               <p className="text-xs text-gray-600">
-                {isDemoUser
-                  ? "데모 계정 5명끼리 같은 시드 시간표로 수업이 겹쳐요. 공통 수업이 많은 순으로 보여요."
-                  : "같은 수업(commonCourses)을 듣는 쿠옹이예요. 칩으로 관심사(interestId)를 좁힐 수 있어요."}
+                같은 수업(commonCourses)을 듣는 쿠옹이예요. 칩으로 관심사(interestId)를 좁힐 수 있어요.
               </p>
             </div>
           </div>
         </div>
 
-        {loadingMates && !isDemoUser ? (
+        {loadingMates ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
             <p className="text-sm text-gray-600">수업 매칭 목록을 불러오는 중이에요.</p>
           </div>
-        ) : isDemoUser && courses.length === 0 ? (
+        ) : user?.id && courses.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
             <p className="text-sm text-gray-600">시간표에 수업을 추가하면 매칭할 수 있어요.</p>
             <button
@@ -354,12 +320,10 @@ export function ClassMatchingPage() {
               시간표로 가기
             </button>
           </div>
-        ) : mates.length === 0 ? (
+        ) : backendMates.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
             <p className="text-sm text-gray-600">
-              {isDemoUser
-                ? "지금은 공통 수업이 있는 다른 데모 쿠옹이가 없어요."
-                : "조건에 맞는 쿠옹이가 아직 없어요. 시간표·관심사 칩을 바꿔 보거나 나중에 다시 확인해 주세요."}
+              조건에 맞는 쿠옹이가 아직 없어요. 시간표·관심사 칩을 바꿔 보거나 나중에 다시 확인해 주세요.
             </p>
           </div>
         ) : (
@@ -367,12 +331,12 @@ export function ClassMatchingPage() {
             <div className="flex items-center gap-2 px-1">
               <Users className="w-5 h-5" style={{ color: "#A71930" }} />
               <p className="text-sm font-semibold text-gray-700">
-                {mates.length}명의 쿠옹이 발견!
+                {backendMates.length}명의 쿠옹이 발견!
               </p>
             </div>
 
             <div className="space-y-3">
-              {mates.map((mate) => (
+              {backendMates.map((mate) => (
                 <div
                   key={mate.id}
                   role="button"
@@ -457,7 +421,7 @@ export function ClassMatchingPage() {
       <UserProfileDialog
         isOpen={isProfileDialogOpen}
         onClose={() => setProfileDialogOpen(false)}
-        viewerHobbies={user?.id && !isDemoUser ? userHobbies : undefined}
+        viewerHobbies={user?.id ? userHobbies : undefined}
         onSendMessage={() => {
           const mate = selectedUser;
           setProfileDialogOpen(false);

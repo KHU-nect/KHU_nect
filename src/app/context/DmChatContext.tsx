@@ -164,7 +164,7 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
   }, [roomsById]);
 
   const loadServerRooms = useCallback(async () => {
-    if (!user?.id || user.id.startsWith("demo-user-")) {
+    if (!user?.id) {
       setServerRoomsById({});
       setServerMessagesByRoomId({});
       return;
@@ -264,7 +264,7 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
 
   const loadRoomMessages = useCallback(
     async (roomId: string) => {
-      if (!user?.id || user.id.startsWith("demo-user-")) return;
+      if (!user?.id) return;
       const response = await getDirectChatMessages(roomId, 80);
       const mapped: DmMessage[] = response.messages
         .map((m) => ({
@@ -349,7 +349,7 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
 
   const prefetchDirectChatRoom = useCallback(
     async (roomId: string) => {
-      if (!user?.id || user.id.startsWith("demo-user-")) return;
+      if (!user?.id) return;
       try {
         await loadRoomMessages(String(roomId));
       } catch {
@@ -670,7 +670,7 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (!user?.id || user.id.startsWith("demo-user-")) return;
+    if (!user?.id) return;
     const roomIds = Object.keys(serverRoomsById);
     if (roomIds.length === 0) return;
     let cancelled = false;
@@ -696,7 +696,7 @@ export function DmChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!DIRECT_CHAT_WS_ENABLED) return;
     const token = window.localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (!token || !user?.id || user.id.startsWith("demo-user-")) return;
+    if (!token || !user?.id) return;
 
     let activeClient: Client | null = null;
     const tried = new Set<number>();

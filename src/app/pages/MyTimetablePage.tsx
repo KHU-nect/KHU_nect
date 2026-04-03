@@ -122,8 +122,8 @@ export function MyTimetablePage() {
   };
 
   const handleAddFromCatalog = async (catalog: SearchCourseItem) => {
-    if (!user?.id || user.id.startsWith("demo-user-")) {
-      setErrorMessage("데모 계정에서는 기존 로컬 시간표 편집을 사용해주세요.");
+    if (!user?.id) {
+      setErrorMessage("로그인이 필요해요.");
       return;
     }
     try {
@@ -148,7 +148,7 @@ export function MyTimetablePage() {
 
   const handleRemove = async (id: string) => {
     const entryId = parseServerEntryId(id);
-    if (!entryId || !user?.id || user.id.startsWith("demo-user-")) {
+    if (!entryId || !user?.id) {
       removeCourse(id);
       return;
     }

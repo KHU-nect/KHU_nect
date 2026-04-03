@@ -120,7 +120,7 @@ export function ChatPage() {
 
   /** 새로고침 직후엔 방 목록 요약만 있어서, 서버 방 입장 시 전체 히스토리 GET */
   useEffect(() => {
-    if (!openRoomId || !user?.id || user.id.startsWith("demo-user-")) return;
+    if (!openRoomId || !user?.id) return;
     if (!currentRoom?.isServerRoom) return;
     void prefetchDirectChatRoom(openRoomId);
   }, [openRoomId, user?.id, currentRoom?.isServerRoom, prefetchDirectChatRoom]);

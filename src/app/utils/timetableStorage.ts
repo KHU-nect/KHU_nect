@@ -1,5 +1,4 @@
 import { mockTimetable, type TimetableCourse } from "../mocks/timetable";
-import { DEMO_ACCOUNTS } from "../mocks/demoAccounts";
 import { sortWeekdayLabels } from "./timetableGrid";
 
 export const LEGACY_TIMETABLE_KEY = "khu-nect_timetable";
@@ -73,16 +72,6 @@ export function parseTimetableJson(json: string): TimetableCourse[] {
     return merged;
   } catch {
     return mockTimetable;
-  }
-}
-
-/** 데모 계정별로 저장이 없으면 기본 5과목을 넣어, 수강 인원 집계가 동작하도록 함 */
-export function seedDemoTimetablesIfEmpty(): void {
-  for (const account of DEMO_ACCOUNTS) {
-    const key = timetableKeyForUser(account.id);
-    if (!window.localStorage.getItem(key)) {
-      window.localStorage.setItem(key, JSON.stringify(mockTimetable));
-    }
   }
 }
 

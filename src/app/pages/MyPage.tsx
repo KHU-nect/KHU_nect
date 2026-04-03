@@ -246,37 +246,25 @@ export function MyPage() {
     try {
       const nextBio = editBio.trim();
       const nextTq = editTodayQuestion.trim();
-      if (!authUser.id.startsWith("demo-user-")) {
-        const remote = await updateMyProfile({
-          nickname: editNickname.trim(),
-          major: editMajor.trim(),
-          bio: nextBio,
-          todayQuestion: nextTq,
-        });
-        const bioFromServer =
-          remote.bio != null ? String(remote.bio).trim() : nextBio;
-        const tqFromServer =
-          remote.todayQuestion != null ? String(remote.todayQuestion).trim() : nextTq;
-        commitProfile({
-          ...profile,
-          nickname: remote.nickname ?? editNickname.trim(),
-          department: remote.major ?? editMajor.trim(),
-          studentNumber: editStudentNumber,
-          grade: `${editStudentNumber.slice(0, 2)}학번`,
-          bio: bioFromServer || undefined,
-          todayQuestion: tqFromServer || undefined,
-        });
-      } else {
-        commitProfile({
-          ...profile,
-          nickname: editNickname.trim(),
-          department: editMajor.trim(),
-          studentNumber: editStudentNumber,
-          grade: `${editStudentNumber.slice(0, 2)}학번`,
-          todayQuestion: nextTq || undefined,
-          bio: nextBio || undefined,
-        });
-      }
+      const remote = await updateMyProfile({
+        nickname: editNickname.trim(),
+        major: editMajor.trim(),
+        bio: nextBio,
+        todayQuestion: nextTq,
+      });
+      const bioFromServer =
+        remote.bio != null ? String(remote.bio).trim() : nextBio;
+      const tqFromServer =
+        remote.todayQuestion != null ? String(remote.todayQuestion).trim() : nextTq;
+      commitProfile({
+        ...profile,
+        nickname: remote.nickname ?? editNickname.trim(),
+        department: remote.major ?? editMajor.trim(),
+        studentNumber: editStudentNumber,
+        grade: `${editStudentNumber.slice(0, 2)}학번`,
+        bio: bioFromServer || undefined,
+        todayQuestion: tqFromServer || undefined,
+      });
       setProfileEditOpen(false);
     } catch (e) {
       if (e instanceof ApiError) setProfileSaveError(e.message);
@@ -288,7 +276,7 @@ export function MyPage() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!authUser?.id || authUser.id.startsWith("demo-user-")) return;
+    if (!authUser?.id) return;
 
     const run = async () => {
       try {
@@ -325,7 +313,7 @@ export function MyPage() {
 
   const handleAddHobby = async (hobby: string) => {
     if (!hobby || hobbies.includes(hobby)) return;
-    if (!authUser?.id || authUser.id.startsWith("demo-user-")) {
+    if (!authUser?.id) {
       persistHobbies([...hobbies, hobby]);
       return;
     }
@@ -345,7 +333,7 @@ export function MyPage() {
   };
 
   const handleRemoveHobby = async (hobbyToRemove: string) => {
-    if (!authUser?.id || authUser.id.startsWith("demo-user-")) {
+    if (!authUser?.id) {
       persistHobbies(hobbies.filter((h) => h !== hobbyToRemove));
       return;
     }

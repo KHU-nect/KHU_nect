@@ -5,7 +5,6 @@ import {
   clearLegacyTimetableKey,
   parseTimetableJson,
   readLegacyTimetableIfAny,
-  seedDemoTimetablesIfEmpty,
   timetableKeyForUser,
 } from "../utils/timetableStorage";
 import { getMyTimetable, timetableEntryToCourse } from "../api/timetableApi";
@@ -35,8 +34,6 @@ export function TimetableProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     setLoaded(false);
-    seedDemoTimetablesIfEmpty();
-
     const uid = user?.id ?? "guest";
     const key = timetableKeyForUser(uid);
     const raw = window.localStorage.getItem(key);
@@ -63,8 +60,7 @@ export function TimetableProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // 데모 계정/게스트는 기존 로컬 흐름 유지
-      if (!user?.id || user.id.startsWith("demo-user-")) return;
+      if (!user?.id) return;
 
       try {
         const remote = await getMyTimetable();

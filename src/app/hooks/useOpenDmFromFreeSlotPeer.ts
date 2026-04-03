@@ -29,7 +29,6 @@ export function useOpenDmFromFreeSlotPeer() {
     recordMatchSuccessAlert,
   } = useDmChat();
 
-  const isDemoUser = user?.id?.startsWith("demo-user-") ?? false;
   const accepterLabel = useMemo(() => {
     const dept = profile?.department?.trim();
     return dept ? `${dept} 쿠옹이` : "쿠옹이";
@@ -58,7 +57,7 @@ export function useOpenDmFromFreeSlotPeer() {
           recordMatchSuccessAlert(user.id, roomId, peer.name);
           return roomId;
         }
-        if (!isDemoUser && isNumericServerUserId(peer.userId)) {
+        if (isNumericServerUserId(peer.userId)) {
           const { directChatRoomId } = await acceptMatching(Number(peer.userId));
           await refreshServerRooms();
           await prefetchDirectChatRoom(directChatRoomId);
@@ -67,7 +66,7 @@ export function useOpenDmFromFreeSlotPeer() {
         }
         return acceptWithLocal();
       } catch {
-        if (!isDemoUser && isNumericServerUserId(peer.userId)) {
+        if (isNumericServerUserId(peer.userId)) {
           window.alert("채팅방을 열지 못했어요. 잠시 후 다시 시도해 주세요.");
           return null;
         }
@@ -76,7 +75,6 @@ export function useOpenDmFromFreeSlotPeer() {
     },
     [
       user?.id,
-      isDemoUser,
       refreshServerRooms,
       prefetchDirectChatRoom,
       recordMatchSuccessAlert,

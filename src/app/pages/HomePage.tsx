@@ -16,8 +16,6 @@ import {
 import { getCourseListenerCount } from "../utils/courseListenerCount";
 import { getFreePeriodMatches, mapFreePeriodUsersToPeers } from "../api/matchingApi";
 import {
-  getPeersFreeNow,
-  isDemoAccountId,
   peerCardHeadline,
   peerCardQuote,
   peerHomeFreePillText,
@@ -55,7 +53,7 @@ export function HomePage() {
   const [apiFreeNowPeers, setApiFreeNowPeers] = useState<FreeSlotPeer[]>([]);
 
   useEffect(() => {
-    if (!user?.id || isDemoAccountId(user.id)) {
+    if (!user?.id) {
       setApiFreeNowPeers([]);
       return;
     }
@@ -76,11 +74,9 @@ export function HomePage() {
   }, [user?.id, timeKey]);
 
   const freeNowPeers = useMemo(() => {
-    if (user?.id && !isDemoAccountId(user.id)) {
-      return apiFreeNowPeers;
-    }
-    return getPeersFreeNow(now, user?.id);
-  }, [now, user?.id, apiFreeNowPeers]);
+    if (!user?.id) return [];
+    return apiFreeNowPeers;
+  }, [user?.id, apiFreeNowPeers]);
 
   const handleUserClick = (mate: FreeSlotPeer) => {
     setSelectedUser(mate);
@@ -303,7 +299,7 @@ export function HomePage() {
       <UserProfileDialog
         isOpen={isProfileDialogOpen}
         onClose={() => setProfileDialogOpen(false)}
-        viewerHobbies={user?.id && !isDemoAccountId(user.id) ? viewerHobbies : undefined}
+        viewerHobbies={user?.id ? viewerHobbies : undefined}
         onSendMessage={() => {
           const peer = selectedUser;
           setProfileDialogOpen(false);

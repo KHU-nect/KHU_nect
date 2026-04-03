@@ -78,7 +78,7 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
     acceptSitTogetherRequest,
     getCourseChatLoadError,
   } = useClassChat();
-  const { createRoomFromSitMatch, refreshServerRooms } = useDmChat();
+  const { refreshServerRooms } = useDmChat();
   const { profile } = useProfile();
   const [messageInput, setMessageInput] = useState("");
   const [quickMode, setQuickMode] = useState<QuickMode>("none");
@@ -153,24 +153,6 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
   const handleAcceptSit = async (msg: ClassChatMessage) => {
     if (!user?.id || !msg.senderUserId || msg.kind !== "sitTogether") return;
     if (msg.senderUserId === user.id) return;
-
-    const isDemo = user.id.startsWith("demo-user-");
-    if (isDemo) {
-      const dmRoomId = createRoomFromSitMatch({
-        courseId,
-        posterUserId: msg.senderUserId,
-        accepterUserId: user.id,
-        posterLabel: msg.senderLabel,
-        accepterLabel: senderLabel,
-      });
-      deleteMessage(courseId, msg.id);
-      sitMatchModalShownIdRef.current.add(normalizeMessageId(msg.id));
-      setSitMatchModal({
-        directRoomId: dmRoomId,
-        peerLabel: msg.senderLabel || "쿠옹이",
-      });
-      return;
-    }
 
     setSitAcceptingId(msg.id);
     try {
@@ -247,8 +229,7 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
             {isSit &&
               msg.sitTogetherStatus === "PENDING" &&
               !mine &&
-              user?.id &&
-              !user.id.startsWith("demo-user-") && (
+              user?.id && (
                 <button
                   type="button"
                   disabled={sitAcceptingId === msg.id}
@@ -257,27 +238,6 @@ export function ClassChatThread({ courseId, serverCourseId }: Props) {
                   style={{ backgroundColor: "#A71930" }}
                 >
                   {sitAcceptingId === msg.id ? "처리 중…" : "같이 앉기 수락 → 1:1 채팅"}
-                </button>
-              )}
-            {isSit &&
-              msg.sitTogetherStatus === "PENDING" &&
-              mine &&
-              user?.id?.startsWith("demo-user-") && (
-                <p className="mt-2 text-xs text-gray-500 max-w-[220px]">
-                  데모 모드: 상대가 수락하면 로컬 1:1 방이 열립니다.
-                </p>
-              )}
-            {isSit &&
-              user?.id?.startsWith("demo-user-") &&
-              !mine &&
-              msg.sitTogetherStatus === "PENDING" && (
-                <button
-                  type="button"
-                  onClick={() => void handleAcceptSit(msg)}
-                  className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-white w-full max-w-[220px]"
-                  style={{ backgroundColor: "#A71930" }}
-                >
-                  같이 앉기 수락 (데모)
                 </button>
               )}
             {isSit && msg.sitTogetherStatus === "ACCEPTED" && msg.sitTogetherDirectRoomId && (

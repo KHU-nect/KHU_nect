@@ -37,11 +37,3 @@ export function getStoredProfile(user: UserProfile): Profile | null {
 export function saveProfileForUser(userId: string, profile: Profile) {
   window.localStorage.setItem(profileKeyForUser(userId), JSON.stringify(profile));
 }
-
-/** 데모 계정: 프로필이 없으면 저장해 온보딩 없이 /home 진입 */
-export function seedDemoProfile(user: UserProfile) {
-  const key = profileKeyForUser(user.id);
-  if (window.localStorage.getItem(key)) return;
-  const p: Profile = { ...user };
-  window.localStorage.setItem(key, JSON.stringify(p));
-}

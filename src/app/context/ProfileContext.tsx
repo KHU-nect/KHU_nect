@@ -47,18 +47,6 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // 데모 계정은 로컬 시드/편집 흐름 유지
-      if (user.id.startsWith("demo-user-")) {
-        if (!stored && !cancelled) {
-          setProfile(null);
-          setDraft(null);
-        }
-        if (!cancelled) {
-          setIsProfileReady(true);
-        }
-        return;
-      }
-
       try {
         const remote = await getMyProfile();
         if (cancelled) return;
