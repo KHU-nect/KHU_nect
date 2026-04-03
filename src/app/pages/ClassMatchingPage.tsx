@@ -298,7 +298,7 @@ export function ClassMatchingPage() {
                 내 시간표: {courses.length}개 수업
               </p>
               <p className="text-xs text-gray-600">
-                같은 수업(commonCourses)을 듣는 쿠옹이예요. 칩으로 관심사(interestId)를 좁힐 수 있어요.
+                같은 수업을 듣는 쿠옹이예요. 칩으로 취미가 맞는 쿠옹이를 발견해보세요!
               </p>
             </div>
           </div>
@@ -354,7 +354,7 @@ export function ClassMatchingPage() {
                     <LionAvatar department={mate.department} size="md" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-bold text-gray-800 text-sm">{mate.department}</h3>
+                        <h3 className="font-bold text-gray-800 text-sm">{`${mate.department} 쿠옹이`}</h3>
                         <span className="text-xs text-gray-500">{mate.year}</span>
                       </div>
                       <p className="text-xs text-gray-500 mb-2">{mate.bio}</p>

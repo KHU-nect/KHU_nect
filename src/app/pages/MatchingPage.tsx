@@ -196,7 +196,7 @@ export function MatchingPage() {
       <div className="bg-white border-b border-gray-100 px-5 py-4">
         <h1 className="text-2xl font-bold text-gray-800">공강 매칭</h1>
         <p className="text-sm text-gray-500">
-          시간표 기준 겹치는 공강이 있는 쿠옹이예요. 취미 칩으로 관심사를 좁힐 수 있어요.
+          시간표 기준 겹치는 공강이 있는 쿠옹이예요. 칩으로 취미가 맞는 쿠옹이를 발견해보세요!
         </p>
       </div>
 
